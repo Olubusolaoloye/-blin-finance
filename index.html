@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blin </title>
+    <script>
+      // Fix for "Failed to assign ethereum proxy" and "Invalid property descriptor" errors
+      // that occur in some browser environments (especially with MetaMask) in iframes.
+      (function() {
+        try {
+          var desc = Object.getOwnPropertyDescriptor(window, 'ethereum');
+          if (desc && desc.configurable === false) return;
+          
+          // If it's a getter-only, we redefine it to be a normal property so a value can be assigned.
+          if (desc && desc.get && !desc.set) {
+            var val = window.ethereum;
+            Object.defineProperty(window, 'ethereum', {
+              get: function() { return val; },
+              set: function(v) { val = v; },
+              configurable: true,
+              enumerable: true
+            });
+          }
+        } catch (e) {
+          console.warn('Ethereum provider polyfill error:', e);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+

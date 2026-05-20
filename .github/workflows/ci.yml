@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── TypeScript + lint + build ─────────────────────────────────────────────
+  web:
+    name: Web — typecheck / lint / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ secrets.WALLETCONNECT_PROJECT_ID }}
+          NEXT_PUBLIC_ALCHEMY_API_KEY: ${{ secrets.ALCHEMY_API_KEY }}
+          NEXT_PUBLIC_DEFAULT_CHAIN: "56"
+
+  # ─── Vitest unit tests ────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit tests (Vitest)
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+  # ─── Foundry contracts ────────────────────────────────────────────────────
+  contracts:
+    name: Contracts — forge build / test / coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install OpenZeppelin contracts
+        run: |
+          cd packages/contracts
+          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2 --no-commit
+
+      - name: Build contracts
+        run: |
+          cd packages/contracts
+          forge build --sizes
+
+      - name: Run tests
+        run: |
+          cd packages/contracts
+          forge test -vvv
+
+      - name: Coverage
+        run: |
+          cd packages/contracts
+          forge coverage --report summary
+
+      - name: Gas report
+        run: |
+          cd packages/contracts
+          forge test --gas-report

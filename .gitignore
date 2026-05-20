@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+out/
+.next/
+build/
+
+# Turbo
+.turbo/
+
+# Foundry
+packages/contracts/out/
+packages/contracts/cache/
+packages/contracts/broadcast/
+packages/contracts/lib/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+# Contracts secrets (private keys, API keys)
+packages/contracts/.env.testnet
+packages/contracts/.env.mainnet
+
+# Claude Code session data (private transcripts)
+.claude/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Test coverage
+coverage/
+lcov.info
+
+# TypeScript
+*.tsbuildinfo

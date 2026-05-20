@@ -1,0 +1,52 @@
+{
+  "name": "@blin/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "clean": "rm -rf .next out"
+  },
+  "dependencies": {
+    "@blin/sdk": "workspace:*",
+    "@blin/shared": "workspace:*",
+    "@privy-io/react-auth": "^1.99.1",
+    "@privy-io/wagmi": "^0.2.13",
+    "@rainbow-me/rainbowkit": "^2.1.7",
+    "@supabase/supabase-js": "^2.105.4",
+    "@tanstack/react-query": "^5.56.2",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.446.0",
+    "motion": "^11.11.17",
+    "neverthrow": "^7.1.0",
+    "next": "14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.53.0",
+    "recharts": "^2.12.7",
+    "tailwind-merge": "^2.5.4",
+    "viem": "^2.21.0",
+    "wagmi": "^2.12.0",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@blin/shared": "workspace:*",
+    "@playwright/test": "^1.47.0",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.15",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "~5.3.3",
+    "vitest": "^2.1.0"
+  }
+}

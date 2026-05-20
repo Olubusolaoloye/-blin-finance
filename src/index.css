@@ -1,0 +1,113 @@
+@import url('https://api.fontshare.com/v2/css?f[]=clash-display@400,500,600,700&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-brand-navy: #0D2137;
+  --color-brand-blue: #1A3C6E;
+  --color-brand-accent: #2E86AB;
+  
+  --color-brand-gold: #F5A623;
+  --color-brand-gold-dark: #D4891A;
+  --color-brand-green: #00C896;
+  --color-brand-red: #FF4D4D;
+
+  --color-surface-bg: #F0F4F8;
+  --color-surface-card: #FFFFFF;
+  --color-surface-raised: #F8FAFC;
+  --color-surface-dark: #0D2137;
+
+  --color-text-primary: #0D2137;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+  --color-text-inverse: #FFFFFF;
+
+  --color-border-light: #E2E8F0;
+  --color-border-medium: #CBD5E1;
+
+  --font-display: "Clash Display", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --shadow-sm: 0 1px 3px rgba(13,33,55,0.08), 0 1px 2px rgba(13,33,55,0.04);
+  --shadow-md: 0 4px 16px rgba(13,33,55,0.10), 0 2px 6px rgba(13,33,55,0.06);
+  --shadow-lg: 0 8px 32px rgba(13,33,55,0.12), 0 4px 12px rgba(13,33,55,0.08);
+  --shadow-gold: 0 4px 20px rgba(245,166,35,0.30);
+  --shadow-blue: 0 4px 20px rgba(46,134,171,0.25);
+}
+
+:root {
+  --brand-navy: #0D2137;
+  --brand-blue: #1A3C6E;
+  --brand-accent: #2E86AB;
+  --brand-gold: #F5A623;
+  --brand-gold-dark: #D4891A;
+  --brand-green: #00C896;
+  --brand-red: #FF4D4D;
+
+  --surface-bg: #F0F4F8;
+  --surface-card: #FFFFFF;
+  --surface-raised: #F8FAFC;
+  --surface-dark: #0D2137;
+
+  --text-primary: #0D2137;
+  --text-secondary: #64748B;
+  --text-muted: #94A3B8;
+  --text-inverse: #FFFFFF;
+
+  --border-light: #E2E8F0;
+  --border-medium: #CBD5E1;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 3px rgba(13,33,55,0.08), 0 1px 2px rgba(13,33,55,0.04);
+  --shadow-md: 0 4px 16px rgba(13,33,55,0.10), 0 2px 6px rgba(13,33,55,0.06);
+  --shadow-lg: 0 8px 32px rgba(13,33,55,0.12), 0 4px 12px rgba(13,33,55,0.08);
+  --shadow-gold: 0 4px 20px rgba(245,166,35,0.30);
+  --shadow-blue: 0 4px 20px rgba(46,134,171,0.25);
+
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 400ms;
+  --duration-slower: 600ms;
+}
+
+body {
+  font-family: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  background-color: var(--surface-bg);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Clash Display", ui-sans-serif, system-ui, sans-serif;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

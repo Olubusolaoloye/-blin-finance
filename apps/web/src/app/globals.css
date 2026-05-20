@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-navy:      #0D2137;
+    --brand-blue:      #1A3C6E;
+    --brand-accent:    #2E86AB;
+    --brand-gold:      #F5A623;
+    --brand-gold-dark: #D4891A;
+    --brand-green:     #00C896;
+    --brand-red:       #FF4D4D;
+
+    --surface-bg:     #F0F4F8;
+    --surface-card:   #FFFFFF;
+    --surface-raised: #F8FAFC;
+    --surface-dark:   #0D2137;
+
+    --text-primary:   #0D2137;
+    --text-secondary: #64748B;
+    --text-muted:     #94A3B8;
+    --text-inverse:   #FFFFFF;
+
+    --border-light:  #E2E8F0;
+    --border-medium: #CBD5E1;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: "Satoshi", ui-sans-serif, system-ui, sans-serif;
+    background-color: var(--surface-bg);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Prevent layout shift while fonts load */
+    font-synthesis: none;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Clash Display", ui-sans-serif, system-ui, sans-serif;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  /* Remove tap highlight on mobile */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Better focus styles */
+  :focus-visible {
+    outline: 2px solid var(--brand-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@layer utilities {
+  .animate-shimmer {
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* GPU-accelerated transform for smooth animations */
+  .gpu {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+
+  /* Gradient text utility */
+  .text-gradient {
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
