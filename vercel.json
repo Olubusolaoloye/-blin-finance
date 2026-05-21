@@ -4,12 +4,5 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm --filter @blin/web build",
   "outputDirectory": "apps/web/.next",
-  "regions": ["iad1"],
-  "env": {
-    "NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID": "@walletconnect_project_id",
-    "NEXT_PUBLIC_PRIVY_APP_ID": "@privy_app_id",
-    "NEXT_PUBLIC_SUPABASE_URL": "@supabase_url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key",
-    "NEXT_PUBLIC_ALCHEMY_API_KEY": "@alchemy_api_key"
-  }
+  "regions": ["iad1"]
 }
