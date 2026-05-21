@@ -1,7 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from "next/headers";
-import { cookieToInitialState } from "wagmi";
-import { wagmiServerConfig } from "@/lib/wagmi-server"; // server-safe — no Privy imports
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -34,46 +31,36 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Read wagmi state from the request cookie on the server so WagmiProvider
-  // hydrates with the exact same state the client already has — this prevents
-  // the "Invalid property descriptor" Object.defineProperty crash that occurs
-  // when wagmi's cookieStorage tries to redefine an already-initialised state.
-  const initialState = cookieToInitialState(wagmiServerConfig, (await headers()).get("cookie"));
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="scroll-smooth">
+    /**
+     * suppressHydrationWarning on <html>: Privy and wagmi both initialise
+     * purely on the client (auth state, wallet connection). The server renders
+     * with no wallet/auth state; the client re-hydrates with the real state.
+     * This one-level suppression silences the expected mismatch without hiding
+     * real bugs deeper in the tree.
+     */
+    <html lang="en" className="scroll-smooth" suppressHydrationWarning>
       <head>
-        {/* DNS prefetch + preconnect to font CDN — shaves RTT before stylesheet loads */}
-        <link rel="dns-prefetch"  href="https://api.fontshare.com" />
-        <link rel="preconnect"    href="https://api.fontshare.com" crossOrigin="anonymous" />
+        {/* DNS prefetch + preconnect shaves one RTT before the font stylesheet */}
+        <link rel="dns-prefetch" href="https://api.fontshare.com" />
+        <link rel="preconnect"   href="https://api.fontshare.com" crossOrigin="anonymous" />
         {/*
-          display=swap: text stays visible in fallback font while custom font loads
-          (prevents invisible-text flash that makes the page look blank).
-          rel=preload triggers the fetch early; the <link rel="stylesheet"> below
-          is still needed to actually apply the CSS.
+          Single <link rel="stylesheet"> with display=swap in the URL.
+          - display=swap is handled by the font CDN — text stays visible in the
+            fallback font while the custom font downloads (no invisible-text flash).
+          - We intentionally drop the media="print" + onLoad trick here because
+            React/JSX requires onLoad to be a function, not a string, and the
+            string form throws: "Expected onLoad listener to be a function".
+            The display=swap parameter achieves the same FOUT-prevention goal.
         */}
         <link
-          rel="preload"
-          as="style"
-          href="https://api.fontshare.com/v2/css?f[]=clash-display@600,700&f[]=satoshi@400,500,700&display=swap"
-        />
-        <link
-          href="https://api.fontshare.com/v2/css?f[]=clash-display@600,700&f[]=satoshi@400,500,700&display=swap"
           rel="stylesheet"
-          media="print"
-          // @ts-expect-error — onload is valid on <link> for non-blocking font load
-          onLoad="this.media='all'"
+          href="https://api.fontshare.com/v2/css?f[]=clash-display@600,700&f[]=satoshi@400,500,700&display=swap"
         />
-        {/* Fallback for JS-disabled browsers */}
-        <noscript>
-          <link
-            href="https://api.fontshare.com/v2/css?f[]=clash-display@600,700&f[]=satoshi@400,500,700&display=swap"
-            rel="stylesheet"
-          />
-        </noscript>
       </head>
       <body>
-        <Providers initialState={initialState}>{children}</Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

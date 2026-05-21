@@ -12,10 +12,12 @@ function getAddresses(chainId: number) {
 }
 import type { Address } from "viem";
 import type { BlinClient } from "./client";
+import { formatUnits } from "viem";
 import {
   AUTO_SAVE_VAULT_ABI,
   VAULT_FACTORY_ABI,
   ERC20_ABI,
+  MOCK_ERC20_ABI,
 } from "./abis";
 import type {
   VaultLock,
@@ -241,12 +243,37 @@ export function createLock(
       }
       const caller = client.walletClient.account.address as Address;
 
-      // Approve vault to pull tokens
+      // Read the vault's underlying asset address (e.g. mUSDC on testnet)
       const assetAddress = await client.publicClient.readContract({
         address: req.vaultAddress,
         abi: AUTO_SAVE_VAULT_ABI,
         functionName: "asset",
       }) as Address;
+
+      // ── Pre-flight balance check ──────────────────────────────────────────
+      // Catches ERC20InsufficientBalance (0xe450d38c) BEFORE sending the tx,
+      // giving the user a clear "you need X more tokens" message instead of
+      // a raw hex revert from simulateContract.
+      const balance = await client.publicClient.readContract({
+        address: assetAddress,
+        abi:     ERC20_ABI,
+        functionName: "balanceOf",
+        args:    [caller],
+      }) as bigint;
+
+      if (balance < req.amount) {
+        const decimals = await client.publicClient.readContract({
+          address: assetAddress,
+          abi:     ERC20_ABI,
+          functionName: "decimals",
+        }) as number;
+        const have = formatUnits(balance, decimals);
+        const need = formatUnits(req.amount, decimals);
+        throw new Error(
+          `Insufficient token balance — you have ${have} but need ${need}. ` +
+          `Use the "Get Test Tokens" button to claim free testnet tokens.`,
+        );
+      }
 
       await ensureAllowance(client, assetAddress, req.vaultAddress, req.amount, caller);
 
@@ -299,6 +326,27 @@ export function topUp(
         abi: AUTO_SAVE_VAULT_ABI,
         functionName: "asset",
       }) as Address;
+
+      // Pre-flight balance check — same pattern as createLock
+      const balance = await client.publicClient.readContract({
+        address: assetAddress,
+        abi:     ERC20_ABI,
+        functionName: "balanceOf",
+        args:    [caller],
+      }) as bigint;
+
+      if (balance < req.amount) {
+        const decimals = await client.publicClient.readContract({
+          address: assetAddress,
+          abi:     ERC20_ABI,
+          functionName: "decimals",
+        }) as number;
+        throw new Error(
+          `Insufficient token balance — you have ${formatUnits(balance, decimals)} ` +
+          `but need ${formatUnits(req.amount, decimals)}. ` +
+          `Use the "Get Test Tokens" button to claim free testnet tokens.`,
+        );
+      }
 
       await ensureAllowance(client, assetAddress, req.vaultAddress, req.amount, caller);
 
@@ -395,6 +443,43 @@ export function renameLock(
       return client.walletClient.writeContract(request);
     },
   };
+}
+
+// ─── Public: claimTestTokens (testnet only) ───────────────────────────────────
+// Calls faucet() on the vault's underlying MockERC20 asset.
+// Mints 10,000 tokens to the caller — no auth required on testnet.
+// Returns the tx hash so the caller can await the receipt.
+
+export function claimTestTokens(
+  client: BlinClient,
+  vaultAddress: Address,
+): ResultAsync<`0x${string}`, BlinError> {
+  return ResultAsync.fromPromise(
+    (async () => {
+      if (!client.walletClient?.account) {
+        throw BlinErrors.unauthorizedCaller("anonymous", "connected wallet");
+      }
+      const caller = client.walletClient.account.address as Address;
+
+      // Resolve the underlying asset (MockERC20) from the vault
+      const assetAddress = await client.publicClient.readContract({
+        address: vaultAddress,
+        abi:     AUTO_SAVE_VAULT_ABI,
+        functionName: "asset",
+      }) as Address;
+
+      const { request } = await client.publicClient.simulateContract({
+        address:      assetAddress,
+        abi:          MOCK_ERC20_ABI,
+        functionName: "faucet",
+        args:         [],
+        account:      caller,
+      });
+
+      return client.walletClient.writeContract(request) as Promise<`0x${string}`>;
+    })(),
+    toBlinError,
+  );
 }
 
 // ─── Public: breakLock ────────────────────────────────────────────────────────

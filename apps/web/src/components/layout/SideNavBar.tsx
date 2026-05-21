@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Repeat, PiggyBank, TrendingUp, Banknote, User,
-  LogOut, Calculator, X, ChevronLeft, ChevronRight,
+  LogOut, X, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,6 @@ const NAV_ITEMS = [
   { name: "Vault & Saves",  path: "/vaults",     icon: PiggyBank       },
   { name: "Stocks",         path: "/stocks",     icon: TrendingUp      },
   { name: "Add / Withdraw", path: "/fiat",       icon: Banknote        },
-  { name: "Tax Center",     path: "/tax",        icon: Calculator      },
   { name: "Profile",        path: "/profile",    icon: User            },
 ];
 

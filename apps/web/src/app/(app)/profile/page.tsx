@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import {
   Copy, ChevronRight, ShieldCheck, HelpCircle, LogOut, Settings,
   PiggyBank, Lock, Globe, FileText, Camera, User, Mail, CheckCircle2,
+  Loader2,
 } from "lucide-react";
+import { useChainId, useSwitchChain } from "wagmi";
 import { BlinCard } from "@/components/ui/BlinCard";
 import { UserAvatar } from "@/components/auth/UserAvatar";
 import { BottomSheet } from "@/components/ui/BottomSheet";
@@ -14,6 +16,57 @@ import { BlinButton } from "@/components/ui/BlinButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserStore } from "@/store/userStore";
 import { useProfile } from "@/hooks/useProfile";
+
+// ── Chain metadata ────────────────────────────────────────────────────────────
+const CHAINS = [
+  {
+    id:      1,
+    name:    "Ethereum",
+    label:   "ETH Mainnet",
+    color:   "#627EEA",
+    bg:      "bg-[#627EEA]/10",
+    testnet: false,
+    symbol:  "ETH",
+  },
+  {
+    id:      56,
+    name:    "BNB Chain",
+    label:   "BSC Mainnet",
+    color:   "#F3BA2F",
+    bg:      "bg-[#F3BA2F]/10",
+    testnet: false,
+    symbol:  "BNB",
+  },
+  {
+    id:      42161,
+    name:    "Arbitrum One",
+    label:   "ARB Mainnet",
+    color:   "#28A0F0",
+    bg:      "bg-[#28A0F0]/10",
+    testnet: false,
+    symbol:  "ARB",
+  },
+  {
+    id:      421614,
+    name:    "Arbitrum Sepolia",
+    label:   "Testnet",
+    color:   "#28A0F0",
+    bg:      "bg-[#28A0F0]/10",
+    testnet: true,
+    symbol:  "ARB",
+  },
+] as const;
+
+function ChainLogo({ color, symbol }: { color: string; symbol: string }) {
+  return (
+    <div
+      className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-[11px] text-white shrink-0"
+      style={{ backgroundColor: color }}
+    >
+      {symbol}
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -34,6 +87,12 @@ export default function ProfilePage() {
     market:       false,
     yield:        true,
   });
+
+  // ── Network switcher ────────────────────────────────────────────────────────
+  const chainId                          = useChainId();
+  const { switchChain, isPending: isSwitching, variables: switchVars } = useSwitchChain();
+  const [isNetworkOpen, setIsNetworkOpen] = useState(false);
+  const activeChain = CHAINS.find((c) => c.id === chainId) ?? CHAINS[0];
 
   const handleSignOut = () => {
     setIsSignOutOpen(false);
@@ -107,10 +166,14 @@ export default function ProfilePage() {
               <Copy size={14} />
             </button>
           </div>
-          <div className="flex gap-1">
-            <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold">ETH</span>
-            <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold">BSC</span>
-          </div>
+          <button
+            onClick={() => setIsNetworkOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-white/20 hover:bg-white/30 rounded-full transition-colors"
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: activeChain.color }} />
+            <span className="text-[11px] font-bold text-white">{activeChain.name}</span>
+            <ChevronRight size={11} className="text-white/70" />
+          </button>
         </div>
 
         <div className="flex items-center justify-between">
@@ -183,37 +246,27 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Taxes */}
-        <div>
-          <h3 className="text-[13px] font-semibold text-text-secondary uppercase tracking-wider mb-2 px-2">Taxes &amp; Reports</h3>
-          <div className="bg-white rounded-[16px] border border-border-light overflow-hidden">
-            <button onClick={() => router.push("/tax")} className="w-full flex items-center justify-between p-4 hover:bg-surface-raised transition-colors">
-              <div className="flex items-center gap-3">
-                <FileText size={20} className="text-brand-blue" />
-                <span className="font-semibold text-[15px]">Tax Calculator</span>
-              </div>
-              <div className="flex items-center gap-2 text-text-muted">
-                <span className="text-[13px] bg-brand-green/10 text-brand-green px-2 py-0.5 rounded-md font-semibold">New</span>
-                <ChevronRight size={18} />
-              </div>
-            </button>
-          </div>
-        </div>
-
         {/* Networks */}
         <div>
           <h3 className="text-[13px] font-semibold text-text-secondary uppercase tracking-wider mb-2 px-2">Networks</h3>
           <div className="bg-white rounded-[16px] border border-border-light overflow-hidden">
-            <div className="w-full flex items-center justify-between p-4 border-b border-border-light">
+            <button
+              onClick={() => setIsNetworkOpen(true)}
+              className="w-full flex items-center justify-between p-4 border-b border-border-light hover:bg-surface-raised transition-colors"
+            >
               <div className="flex items-center gap-3">
                 <Globe size={20} className="text-text-secondary" />
                 <span className="font-semibold text-[15px]">Current Network</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-[#627EEA]" />
-                <span className="text-[13px] font-semibold">Ethereum</span>
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: activeChain.color }} />
+                <span className="text-[13px] font-semibold">{activeChain.name}</span>
+                {activeChain.testnet && (
+                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-bold">TESTNET</span>
+                )}
+                <ChevronRight size={16} className="text-text-muted" />
               </div>
-            </div>
+            </button>
             <button className="w-full flex items-center justify-between p-4 hover:bg-surface-raised transition-colors">
               <div className="flex items-center gap-3">
                 <ShieldCheck size={20} className="text-text-secondary" />
@@ -255,6 +308,72 @@ export default function ProfilePage() {
         </div>
 
       </div>
+
+      {/* Network Switcher Sheet */}
+      <BottomSheet isOpen={isNetworkOpen} onClose={() => setIsNetworkOpen(false)} className="h-auto pb-8">
+        <div className="flex flex-col pt-4">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="font-display font-semibold text-[24px]">Switch Network</h2>
+              <p className="text-[13px] text-text-secondary mt-0.5">Select the chain you want to use</p>
+            </div>
+            <div className="w-12 h-12 rounded-full bg-brand-blue/10 flex items-center justify-center text-brand-blue">
+              <Globe size={22} />
+            </div>
+          </div>
+
+          <div className="space-y-2 mb-6">
+            {CHAINS.map((chain) => {
+              const isActive    = chain.id === chainId;
+              const isSwitchingTo = isSwitching && switchVars?.chainId === chain.id;
+              return (
+                <button
+                  key={chain.id}
+                  onClick={() => {
+                    if (!isActive) switchChain({ chainId: chain.id });
+                    else setIsNetworkOpen(false);
+                  }}
+                  disabled={isSwitching}
+                  className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition-all ${
+                    isActive
+                      ? "border-brand-blue bg-brand-blue/5"
+                      : "border-border-light bg-white hover:bg-surface-raised hover:border-border-medium"
+                  } disabled:opacity-60 disabled:cursor-not-allowed`}
+                >
+                  <ChainLogo color={chain.color} symbol={chain.symbol} />
+
+                  <div className="flex-1 text-left">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-[15px]">{chain.name}</span>
+                      {chain.testnet && (
+                        <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-bold">TESTNET</span>
+                      )}
+                    </div>
+                    <span className="text-[12px] text-text-muted">{chain.label}</span>
+                  </div>
+
+                  <div className="shrink-0">
+                    {isSwitchingTo ? (
+                      <Loader2 size={18} className="animate-spin text-brand-blue" />
+                    ) : isActive ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
+                        <span className="text-[12px] font-semibold text-brand-green">Connected</span>
+                      </div>
+                    ) : (
+                      <ChevronRight size={18} className="text-text-muted" />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-center text-[12px] text-text-muted px-4">
+            Switching networks may require a wallet confirmation from your Privy embedded wallet.
+          </p>
+        </div>
+      </BottomSheet>
 
       {/* Edit Profile Sheet */}
       <BottomSheet isOpen={isEditProfileOpen} onClose={() => setIsEditProfileOpen(false)} className="h-auto pb-8">

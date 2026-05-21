@@ -48,11 +48,13 @@ export const CONTRACT_ADDRESSES: Record<SupportedChainId, ContractAddresses> = {
  *   → copy printed VaultFactory and SaveSwap addresses here
  */
 export const TESTNET_CONTRACT_ADDRESSES: Record<TestnetChainId, ContractAddresses> = {
-  // Arbitrum Sepolia (421614) — deployed 2026-05-20
+  // Arbitrum Sepolia (421614) — redeployed 2026-05-21 (push-model fix)
+  // AutoSaveVault now pushes tokens to strategy via safeTransfer() before deposit().
+  // AaveV3Strategy.deposit() no longer needs transferFrom — tokens arrive via push.
   421614: {
-    saveSwap:     "0x56747F5e1487d9E61559Aee1Dc87627484CCc55A",
-    vaultFactory: "0xd0866AEf7Ff089d6316EEF4c37fa789fe7ab4162",
-    aavePool:     "0x733F68A78aDDC0AB813b66867E4BeF29D5C83d4e",
+    saveSwap:     "0xde6B9F78097d6e5123cB51eEC03550Dc40E9ae2c",
+    vaultFactory: "0x073bb6923Bd4347F090E84438B155E6Dd04723C9",
+    aavePool:     "0xc9c2452bBc1004f31FA5fE9cE1e558e18AdFa3AB",
     treasury:     "0xA7d617117887b3cAf2C93B07ceD3081Ee9F8F63a",
   },
   // BSC Testnet (97) — fill after running DeployTestnet.s.sol on BSC testnet

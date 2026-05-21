@@ -4,8 +4,9 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   PiggyBank, Lock, Plus, CheckCircle2, Settings,
-  ChevronRight, Loader2, RefreshCw,
+  ChevronRight, Loader2, RefreshCw, Droplets,
 } from "lucide-react";
+import { useAccount } from "wagmi";
 import { formatUnits } from "viem";
 import type { Address } from "viem";
 import type { VaultLock } from "@blin/sdk";
@@ -53,9 +54,14 @@ function estimatedYield(amount: bigint, decimals: number, durationSecs: bigint):
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+// Arbitrum Sepolia testnet chain ID
+const TESTNET_CHAIN_ID = 421614;
+
 export default function VaultsPage() {
   const vaultData  = useVaultData();
   const autoSave   = useAutoSaveConfig();
+  const { chainId } = useAccount();
+  const isTestnet   = chainId === TESTNET_CHAIN_ID;
 
   const {
     vaultEnabled,
@@ -185,7 +191,24 @@ export default function VaultsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="font-display font-semibold text-[20px] text-text-primary">Vault &amp; Saves</h1>
-        {isFetching && <RefreshCw size={14} className="text-text-muted animate-spin" />}
+        <div className="flex items-center gap-2">
+          {isFetching && <RefreshCw size={14} className="text-text-muted animate-spin" />}
+          {/* Testnet faucet button — mint 10,000 mUSDC in one tap */}
+          {/* Shown whenever on testnet — works before a vault is deployed */}
+          {isTestnet && (
+            <button
+              onClick={() => mutations.claimTestTokens.mutateAsync({ vaultAddress: vaultAddress as Address ?? null })}
+              disabled={mutations.claimTestTokens.isPending}
+              title="Claim 10,000 free test USDC"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-brand-blue/10 border border-brand-blue/20 text-brand-blue text-[12px] font-semibold hover:bg-brand-blue/20 transition-colors disabled:opacity-50"
+            >
+              {mutations.claimTestTokens.isPending
+                ? <Loader2 size={12} className="animate-spin" />
+                : <Droplets size={12} />}
+              Get Test Tokens
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── AutoSave Section ──────────────────────────────────────────────── */}

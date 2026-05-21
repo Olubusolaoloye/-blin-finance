@@ -5,11 +5,12 @@ import { useAccount } from "wagmi";
 import { parseUnits } from "viem";
 import type { Address } from "viem";
 import {
-  createLock as sdkCreateLock,
-  topUp      as sdkTopUp,
-  withdraw   as sdkWithdraw,
-  breakLock  as sdkBreakLock,
-  renameLock as sdkRenameLock,
+  createLock      as sdkCreateLock,
+  topUp           as sdkTopUp,
+  withdraw        as sdkWithdraw,
+  breakLock       as sdkBreakLock,
+  renameLock      as sdkRenameLock,
+  claimTestTokens as sdkClaimTestTokens,
 } from "@blin/sdk";
 import { CONTRACT_ADDRESSES, TESTNET_CONTRACT_ADDRESSES } from "@blin/shared";
 
@@ -35,15 +36,17 @@ export interface CreateLockParams {
 
 export interface VaultMutationsResult {
   /** Create a new time-locked savings position. Auto-deploys vault if needed. */
-  createLock:  ReturnType<typeof useMutation<Address, Error, CreateLockParams>>;
+  createLock:       ReturnType<typeof useMutation<Address, Error, CreateLockParams>>;
   /** Add more principal to an existing lock. */
-  topUp:       ReturnType<typeof useMutation<void, Error, { lockId: bigint; amount: string; vaultAddress: Address; assetDecimals: number }>>;
+  topUp:            ReturnType<typeof useMutation<void, Error, { lockId: bigint; amount: string; vaultAddress: Address; assetDecimals: number }>>;
   /** Withdraw a matured lock (principal + yield). */
-  withdraw:    ReturnType<typeof useMutation<void, Error, { lockId: bigint; vaultAddress: Address }>>;
+  withdraw:         ReturnType<typeof useMutation<void, Error, { lockId: bigint; vaultAddress: Address }>>;
   /** Break a lock early (incurs 15% penalty). */
-  breakLock:   ReturnType<typeof useMutation<void, Error, { lockId: bigint; vaultAddress: Address }>>;
+  breakLock:        ReturnType<typeof useMutation<void, Error, { lockId: bigint; vaultAddress: Address }>>;
   /** Rename a lock. */
-  renameLock:  ReturnType<typeof useMutation<void, Error, { lockId: bigint; name: string; vaultAddress: Address }>>;
+  renameLock:       ReturnType<typeof useMutation<void, Error, { lockId: bigint; name: string; vaultAddress: Address }>>;
+  /** Testnet only — calls faucet() on the MockERC20 to mint 10,000 test tokens. Works before a vault exists. */
+  claimTestTokens:  ReturnType<typeof useMutation<void, Error, { vaultAddress: Address | null }>>;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -206,5 +209,27 @@ export function useVaultMutations(vaultAddress: Address | null): VaultMutationsR
     },
   });
 
-  return { createLock, topUp, withdraw, breakLock, renameLock };
+  // ── Claim test tokens (testnet only) ─────────────────────────────────────
+  // Works even before a vault exists — ensureVault() deploys one on demand
+  // so we can resolve the MockERC20 asset address and call faucet().
+  const claimTestTokens = useMutation<void, Error, { vaultAddress: Address | null }>({
+    mutationFn: async ({ vaultAddress: vault }) => {
+      if (!client) throw new Error("Client not initialised");
+      // If no vault yet, deploy one now — needed to resolve the asset address
+      const resolvedVault = vault ?? await ensureVault();
+      const result = await sdkClaimTestTokens(client, resolvedVault);
+      if (result.isErr()) throw result.error;
+      // Wait for the faucet tx to be mined so balance updates immediately
+      await client.publicClient.waitForTransactionReceipt({ hash: result.value });
+    },
+    onSuccess: () => {
+      addNotification({ title: "Test Tokens Claimed!", message: "10,000 test USDC added to your wallet.", type: "success" });
+      qc.invalidateQueries({ queryKey: ["balances"] });
+    },
+    onError: (err) => {
+      addNotification({ title: "Faucet Failed", message: err.message, type: "alert" });
+    },
+  });
+
+  return { createLock, topUp, withdraw, breakLock, renameLock, claimTestTokens };
 }
