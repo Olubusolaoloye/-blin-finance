@@ -11,7 +11,7 @@ import {
 } from "wagmi";
 import {
   X, Copy, CheckCircle2, Send, History,
-  ArrowDownLeft, Loader2, AlertCircle, ChevronRight,
+  ArrowDownLeft, Loader2, AlertCircle,
 } from "lucide-react";
 import { TokenIcon }      from "@/components/ui/TokenIcon";
 import { AmountDisplay }  from "@/components/ui/AmountDisplay";
@@ -21,7 +21,7 @@ import { useAlchemyTransfers } from "@/hooks/useAlchemyTransfers";
 import type { PortfolioToken } from "@/hooks/usePortfolio";
 import { NATIVE_ADDRESS } from "@/lib/tokens";
 
-// ─── Minimal ERC-20 ABI (no SDK import to avoid chain issues) ─────────────────
+/* ─── Minimal ERC-20 ABI ────────────────────────────────────────────────────── */
 const ERC20_ABI = [
   {
     type: "function",
@@ -42,7 +42,7 @@ interface Props {
   onClose: () => void;
 }
 
-// ─── History tab ──────────────────────────────────────────────────────────────
+/* ─── History tab ────────────────────────────────────────────────────────────── */
 function HistoryPanel({ token }: { token: PortfolioToken }) {
   const { transfers, isLoading } = useAlchemyTransfers(50);
 
@@ -102,7 +102,7 @@ function HistoryPanel({ token }: { token: PortfolioToken }) {
   );
 }
 
-// ─── Receive tab ──────────────────────────────────────────────────────────────
+/* ─── Receive tab ────────────────────────────────────────────────────────────── */
 function ReceivePanel({ token, address }: { token: PortfolioToken; address: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -130,6 +130,7 @@ function ReceivePanel({ token, address }: { token: PortfolioToken; address: stri
 
       {/* Address row */}
       <button
+        type="button"
         onClick={copy}
         className="flex items-center gap-3 w-full bg-surface-raised border border-border-light rounded-2xl p-4 hover:bg-surface-raised/80 active:scale-[0.98] transition-all"
       >
@@ -155,7 +156,7 @@ function ReceivePanel({ token, address }: { token: PortfolioToken; address: stri
   );
 }
 
-// ─── Send tab ─────────────────────────────────────────────────────────────────
+/* ─── Send tab ───────────────────────────────────────────────────────────────── */
 function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => void }) {
   const { address } = useAuth();
 
@@ -184,10 +185,14 @@ function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => v
 
   const txHash    = isNative ? nativeHash    : erc20Hash;
   const isPending = isNative ? nativePending : erc20Pending;
-  const txError   = isNative ? nativeError   : erc20Error;
-  const txErrMsg  = txError
-    ? (String((txError as { message?: string }).message || txError))
-        .split("\n")[0].split("(")[0].trim()
+
+  /* Safely extract error message — wagmi error types vary across versions */
+  const rawError  = isNative ? nativeError : erc20Error;
+  const txErrMsg: string | null = rawError != null
+    ? String((rawError as { message?: unknown }).message ?? rawError)
+        .split("\n")[0]!
+        .split("(")[0]!
+        .trim()
     : null;
 
   const { isLoading: isMining, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
@@ -214,7 +219,7 @@ function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => v
 
   const handleReset = () => {
     setTo(""); setAmount("");
-    isNative ? nativeReset() : erc20Reset();
+    if (isNative) nativeReset(); else erc20Reset();
   };
 
   /* Success screen */
@@ -232,6 +237,7 @@ function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => v
           {to.slice(0, 8)}…{to.slice(-6)}
         </p>
         <button
+          type="button"
           onClick={handleReset}
           className="w-full h-12 rounded-2xl border-2 border-border-light text-[15px] font-semibold text-text-secondary hover:bg-surface-raised transition-colors"
         >
@@ -325,7 +331,7 @@ function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => v
       )}
 
       {/* Error */}
-      {txErrMsg && (
+      {txErrMsg !== null && (
         <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl p-3">
           <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
           <p className="text-[12px] text-red-500 leading-relaxed">{txErrMsg}</p>
@@ -351,13 +357,14 @@ function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => v
   );
 }
 
-// ─── Main sheet ───────────────────────────────────────────────────────────────
+/* ─── Tab config ─────────────────────────────────────────────────────────────── */
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "history", label: "History", icon: <History size={14} />      },
   { id: "receive", label: "Receive", icon: <ArrowDownLeft size={14} /> },
   { id: "send",    label: "Send",    icon: <Send size={14} />          },
 ];
 
+/* ─── Main sheet ─────────────────────────────────────────────────────────────── */
 export function AssetDetailSheet({ token, onClose }: Props) {
   const { address } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>("history");
@@ -365,17 +372,17 @@ export function AssetDetailSheet({ token, onClose }: Props) {
   const [visible,   setVisible]   = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
 
-  /* Mount portal + detect desktop */
+  /* Portal mount + responsive detection */
   useEffect(() => {
     setMounted(true);
-    const mq = window.matchMedia("(min-width: 768px)");
+    const mq      = window.matchMedia("(min-width: 768px)");
     setIsDesktop(mq.matches);
     const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  /* Animate in/out */
+  /* Slide-in animation (10 ms delay lets the CSS transition fire) */
   useEffect(() => {
     if (token) {
       const t = setTimeout(() => setVisible(true), 10);
@@ -385,12 +392,12 @@ export function AssetDetailSheet({ token, onClose }: Props) {
     }
   }, [token]);
 
-  /* Reset tab on new token */
+  /* Reset tab when a new token is selected */
   useEffect(() => {
     if (token) setActiveTab("history");
   }, [token]);
 
-  /* Lock body scroll while open */
+  /* Body scroll lock */
   useEffect(() => {
     document.body.style.overflow = token ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
@@ -398,15 +405,15 @@ export function AssetDetailSheet({ token, onClose }: Props) {
 
   if (!mounted) return null;
 
+  const isOpen = !!token;
+  const show   = visible && isOpen;
+
   const humanBalance = token
     ? parseFloat(formatUnits(token.balance, token.decimals))
     : 0;
 
-  const isOpen = !!token;
-  const show   = visible && isOpen;
-
-  /* ── Desktop: centered modal ─────────────────────────────────────────── */
-  const desktopPanelStyle: React.CSSProperties = {
+  /* ── Desktop: centered modal ──────────────────────────────────────────────── */
+  const desktopStyle: React.CSSProperties = {
     position:      "fixed",
     top:           "50%",
     left:          "50%",
@@ -424,10 +431,11 @@ export function AssetDetailSheet({ token, onClose }: Props) {
     flexDirection: "column",
     boxShadow:     "0 24px 64px rgba(13,33,55,0.22), 0 4px 16px rgba(0,0,0,0.08)",
     pointerEvents: isOpen ? "auto" : "none",
+    overflow:      "hidden",
   };
 
-  /* ── Mobile: bottom sheet ────────────────────────────────────────────── */
-  const mobilePanelStyle: React.CSSProperties = {
+  /* ── Mobile: bottom sheet ─────────────────────────────────────────────────── */
+  const mobileStyle: React.CSSProperties = {
     position:      "fixed",
     bottom:        0,
     left:          0,
@@ -442,35 +450,33 @@ export function AssetDetailSheet({ token, onClose }: Props) {
     transform:     show ? "translateY(0)" : "translateY(100%)",
     transition:    "transform 0.3s cubic-bezier(0.32,0.72,0,1)",
     pointerEvents: isOpen ? "auto" : "none",
+    overflow:      "hidden",
   };
-
-  const panelStyle = isDesktop ? desktopPanelStyle : mobilePanelStyle;
 
   return createPortal(
     <>
       {/* Backdrop */}
       <div
+        role="presentation"
         onClick={onClose}
         style={{
-          position:      "fixed",
-          inset:         0,
-          background:    isDesktop
-            ? "rgba(13,33,55,0.4)"
-            : "rgba(13,33,55,0.55)",
+          position:       "fixed",
+          inset:          0,
+          background:     isDesktop ? "rgba(13,33,55,0.4)" : "rgba(13,33,55,0.55)",
           backdropFilter: isDesktop ? "blur(4px)" : "none",
-          zIndex:        9998,
-          opacity:       show ? 1 : 0,
-          transition:    "opacity 0.22s ease",
-          pointerEvents: isOpen ? "auto" : "none",
+          zIndex:         9998,
+          opacity:        show ? 1 : 0,
+          transition:     "opacity 0.22s ease",
+          pointerEvents:  isOpen ? "auto" : "none",
         }}
       />
 
       {/* Panel */}
-      <div style={panelStyle}>
+      <div style={isDesktop ? desktopStyle : mobileStyle}>
 
-        {/* Drag handle — mobile only */}
+        {/* Mobile drag handle */}
         {!isDesktop && (
-          <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 6px" }}>
+          <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px" }}>
             <div style={{ width: 36, height: 4, background: "#CBD5E1", borderRadius: 99 }} />
           </div>
         )}
@@ -478,15 +484,15 @@ export function AssetDetailSheet({ token, onClose }: Props) {
         {token && (
           <>
             {/* Token header */}
-            <div className={`flex items-center gap-3 px-5 pb-4 border-b border-border-light ${isDesktop ? "pt-5" : "pt-1"}`}>
+            <div className={`flex items-center gap-3 px-5 pb-4 border-b border-border-light shrink-0 ${isDesktop ? "pt-5" : "pt-2"}`}>
               <TokenIcon symbol={token.symbol} size={44} />
-              <div className="flex-1">
-                <div className="font-display font-bold text-[19px] text-text-primary leading-tight">
+              <div className="flex-1 min-w-0">
+                <div className="font-display font-bold text-[19px] text-text-primary leading-tight truncate">
                   {token.name}
                 </div>
                 <div className="text-[13px] text-text-muted">{token.symbol}</div>
               </div>
-              <div className="text-right mr-1">
+              <div className="text-right shrink-0 mr-1">
                 <div className="font-bold text-[17px] text-text-primary">
                   {humanBalance.toLocaleString(undefined, { maximumFractionDigits: 6 })}
                 </div>
@@ -496,7 +502,6 @@ export function AssetDetailSheet({ token, onClose }: Props) {
                   className="text-[13px] text-text-muted"
                 />
               </div>
-              {/* Close always visible on desktop; optional on mobile */}
               <button
                 type="button"
                 onClick={onClose}
