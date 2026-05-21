@@ -1,0 +1,10 @@
+node_modules
+.git
+apps/web/.next
+apps/web/node_modules
+packages/contracts
+packages/contracts/out
+packages/contracts/cache
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
