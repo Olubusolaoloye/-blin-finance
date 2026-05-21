@@ -325,7 +325,7 @@ function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => v
         <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl p-3">
           <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
           <p className="text-[12px] text-red-500 leading-relaxed">
-            {txError.message.split("\n")[0].split("(")[0].trim()}
+            {(txError.message ?? String(txError)).split("\n")[0].split("(")[0].trim()}
           </p>
         </div>
       )}
