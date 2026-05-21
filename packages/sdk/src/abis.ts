@@ -141,13 +141,18 @@ export const AUTO_SAVE_VAULT_ABI = [
     outputs: [{ name: "", type: "uint256" }],
   },
 
-  // ─── Custom errors ─────────────────────────────────────────────────────────
-  { type: "error", name: "LockNotMatured",   inputs: [{ name: "lockId", type: "uint256" }, { name: "lockedUntil", type: "uint256" }, { name: "currentTime", type: "uint256" }] },
-  { type: "error", name: "LockAlreadyMatured", inputs: [{ name: "lockId", type: "uint256" }, { name: "lockedUntil", type: "uint256" }, { name: "currentTime", type: "uint256" }] },
-  { type: "error", name: "LockDoesNotExist", inputs: [{ name: "lockId", type: "uint256" }] },
-  { type: "error", name: "LockAlreadyBroken", inputs: [{ name: "lockId", type: "uint256" }] },
-  { type: "error", name: "ZeroAmount",       inputs: [] },
+  // ─── Custom errors (vault) ─────────────────────────────────────────────────
+  { type: "error", name: "LockNotMatured",      inputs: [{ name: "lockId", type: "uint256" }, { name: "lockedUntil", type: "uint256" }, { name: "currentTime", type: "uint256" }] },
+  { type: "error", name: "LockAlreadyMatured",  inputs: [{ name: "lockId", type: "uint256" }, { name: "lockedUntil", type: "uint256" }, { name: "currentTime", type: "uint256" }] },
+  { type: "error", name: "LockDoesNotExist",    inputs: [{ name: "lockId", type: "uint256" }] },
+  { type: "error", name: "LockAlreadyBroken",   inputs: [{ name: "lockId", type: "uint256" }] },
+  { type: "error", name: "ZeroAmount",          inputs: [] },
   { type: "error", name: "InvalidLockDuration", inputs: [{ name: "duration", type: "uint256" }, { name: "min", type: "uint256" }, { name: "max", type: "uint256" }] },
+  // OZ v5 ERC-20 errors — thrown by the underlying asset (USDC) and bubble
+  // up through safeTransferFrom inside createLock / topUp.  Adding them here
+  // lets viem decode the revert reason instead of showing raw hex 0xe450d38c.
+  { type: "error", name: "ERC20InsufficientBalance",  inputs: [{ name: "sender",   type: "address" }, { name: "balance",   type: "uint256" }, { name: "needed",    type: "uint256" }] },
+  { type: "error", name: "ERC20InsufficientAllowance", inputs: [{ name: "spender",  type: "address" }, { name: "allowance", type: "uint256" }, { name: "needed",    type: "uint256" }] },
 ] as const satisfies Abi;
 
 export const VAULT_FACTORY_ABI = [
@@ -243,6 +248,65 @@ export const ERC20_ABI = [
     stateMutability: "nonpayable",
     inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }],
     outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "decimals",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }],
+  },
+  {
+    type: "function",
+    name: "transfer",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "transferFrom",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "from", type: "address" }, { name: "to", type: "address" }, { name: "amount", type: "uint256" }],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "totalSupply",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  // OZ v5 errors — useful when viem parses transfer/approve reverts
+  { type: "error", name: "ERC20InsufficientBalance",   inputs: [{ name: "sender",   type: "address" }, { name: "balance",   type: "uint256" }, { name: "needed",    type: "uint256" }] },
+  { type: "error", name: "ERC20InsufficientAllowance", inputs: [{ name: "spender",  type: "address" }, { name: "allowance", type: "uint256" }, { name: "needed",    type: "uint256" }] },
+] as const satisfies Abi;
+
+// ─── MockERC20 ABI (testnet only) ─────────────────────────────────────────────
+// Used to call faucet() on the testnet MockERC20 so users can get test tokens
+// without leaving the app.  FAUCET_AMOUNT = 10,000 tokens per call.
+
+export const MOCK_ERC20_ABI = [
+  {
+    type: "function",
+    name: "faucet",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
   },
   {
     type: "function",

@@ -1,20 +1,23 @@
 "use client";
 
-import { motion } from "motion/react";
+import { useState } from "react";
+import { motion } from "motion/react"; // still used by quick-action buttons
 import { useRouter } from "next/navigation";
 import { formatUnits } from "viem";
 import {
   Copy, ArrowUpRight, ArrowDownLeft, Repeat,
   PiggyBank, TrendingUp, Banknote, ChevronRight, RefreshCw,
 } from "lucide-react";
-import { UserAvatar } from "@/components/auth/UserAvatar";
-import { BlinCard } from "@/components/ui/BlinCard";
-import { BlinBadge } from "@/components/ui/BlinBadge";
-import { TokenIcon } from "@/components/ui/TokenIcon";
-import { AmountDisplay } from "@/components/ui/AmountDisplay";
-import { TransactionRow } from "@/components/ui/TransactionRow";
-import { useAuth } from "@/hooks/useAuth";
-import { usePortfolio } from "@/hooks/usePortfolio";
+import { UserAvatar }      from "@/components/auth/UserAvatar";
+import { BlinCard }        from "@/components/ui/BlinCard";
+import { BlinBadge }       from "@/components/ui/BlinBadge";
+import { TokenIcon }       from "@/components/ui/TokenIcon";
+import { AmountDisplay }   from "@/components/ui/AmountDisplay";
+import { TransactionRow }  from "@/components/ui/TransactionRow";
+import { AssetDetailSheet } from "@/components/asset/AssetDetailSheet";
+import { useAuth }         from "@/hooks/useAuth";
+import { usePortfolio }    from "@/hooks/usePortfolio";
+import type { PortfolioToken } from "@/hooks/usePortfolio";
 import { useAlchemyTransfers } from "@/hooks/useAlchemyTransfers";
 
 // Vault contracts not deployed yet
@@ -23,6 +26,7 @@ const vaultEnabled = false;
 export default function Dashboard() {
   const router = useRouter();
   const { address, shortAddress, firstName } = useAuth();
+  const [selectedAsset, setSelectedAsset] = useState<PortfolioToken | null>(null);
 
   const {
     tokens,
@@ -40,6 +44,7 @@ export default function Dashboard() {
   } = useAlchemyTransfers(10);
 
   return (
+    <>
     <div className="flex flex-col gap-6 md:gap-8">
 
       {/* Header */}
@@ -205,9 +210,11 @@ export default function Dashboard() {
                   : tokens.map((token, i) => {
                     const humanBalance = parseFloat(formatUnits(token.balance, token.decimals));
                     return (
-                      <div
+                      <button
                         key={i}
-                        className="flex items-center justify-between p-4 border-b border-border-light last:border-0 hover:bg-surface-raised transition-colors cursor-pointer"
+                        type="button"
+                        onClick={() => setSelectedAsset(token)}
+                        className="w-full flex items-center justify-between p-4 border-b border-border-light last:border-0 hover:bg-surface-raised active:bg-surface-raised transition-colors text-left"
                       >
                         <div className="flex items-center gap-3">
                           <TokenIcon symbol={token.symbol} size={36} />
@@ -216,17 +223,20 @@ export default function Dashboard() {
                             <div className="text-[13px] text-text-muted">{token.symbol}</div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="font-bold text-[15px] text-text-primary">
-                            {humanBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                        <div className="flex items-center gap-2">
+                          <div className="text-right">
+                            <div className="font-bold text-[15px] text-text-primary">
+                              {humanBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                            </div>
+                            <AmountDisplay
+                              amount={token.usdValue}
+                              currency="USD"
+                              className="text-[13px] text-text-muted"
+                            />
                           </div>
-                          <AmountDisplay
-                            amount={token.usdValue}
-                            currency="USD"
-                            className="text-[13px] text-text-muted"
-                          />
+                          <ChevronRight size={16} className="text-text-muted shrink-0" />
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
             </div>
@@ -305,6 +315,9 @@ export default function Dashboard() {
         </div>
       </div>
     </div>
+
+    <AssetDetailSheet token={selectedAsset} onClose={() => setSelectedAsset(null)} />
+    </>
   );
 }
 
