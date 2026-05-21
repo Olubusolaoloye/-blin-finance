@@ -1,0 +1,18 @@
+[build]
+  # Run from repo root so pnpm resolves all workspace packages
+  base    = "."
+  # Turbo respects "dependsOn": ["^build"] — builds shared → sdk → web in order
+  command = "pnpm install --frozen-lockfile && npx turbo run build --filter=@blin/web"
+  # Next.js output directory (relative to base)
+  publish = "apps/web/.next"
+
+[build.environment]
+  NODE_VERSION            = "20"
+  PNPM_VERSION            = "9"
+  NEXT_TELEMETRY_DISABLED = "1"
+  # Suppress Turbo telemetry in CI
+  TURBO_TELEMETRY_DISABLED = "1"
+
+# Netlify Next.js runtime — handles SSR, ISR, Image Optimisation
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
