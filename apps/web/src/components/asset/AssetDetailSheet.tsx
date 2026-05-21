@@ -185,6 +185,10 @@ function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => v
   const txHash    = isNative ? nativeHash    : erc20Hash;
   const isPending = isNative ? nativePending : erc20Pending;
   const txError   = isNative ? nativeError   : erc20Error;
+  const txErrMsg  = txError
+    ? (String((txError as { message?: string }).message || txError))
+        .split("\n")[0].split("(")[0].trim()
+    : null;
 
   const { isLoading: isMining, isSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
@@ -321,12 +325,10 @@ function SendPanel({ token, onClose }: { token: PortfolioToken; onClose: () => v
       )}
 
       {/* Error */}
-      {txError && (
+      {txErrMsg && (
         <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-xl p-3">
           <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" />
-          <p className="text-[12px] text-red-500 leading-relaxed">
-            {(txError.message ?? String(txError)).split("\n")[0].split("(")[0].trim()}
-          </p>
+          <p className="text-[12px] text-red-500 leading-relaxed">{txErrMsg}</p>
         </div>
       )}
 
