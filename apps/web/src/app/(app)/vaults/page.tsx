@@ -242,21 +242,8 @@ export default function VaultsPage() {
 
       {/* ── AutoSave Section ──────────────────────────────────────────────── */}
       <section>
-        {!vaultEnabled ? (
-          /* Contracts not deployed yet */
-          <BlinCard variant="dark" className="bg-gradient-to-br from-[#1A3C6E] to-[#2E86AB] text-center p-8">
-            <PiggyBank size={64} className="text-brand-gold mx-auto mb-4" />
-            <h2 className="font-display font-semibold text-[22px] text-white mb-2">AutoSave — Coming Soon</h2>
-            <p className="text-[14px] text-white/70 mb-4">
-              Save a % of every swap automatically and earn Aave yield while it&apos;s locked.
-            </p>
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 rounded-full text-[12px] text-white/70 font-medium">
-              <div className="w-2 h-2 rounded-full bg-brand-gold animate-pulse" />
-              Contracts deploying to mainnet
-            </div>
-          </BlinCard>
-        ) : (
-          /* Contracts deployed — show AutoSave config */
+        {/* Contracts deployed — show AutoSave config */}
+        {true && (
           <BlinCard className="p-5 border border-brand-gold/20 bg-gradient-to-br from-brand-gold/[0.03] to-transparent">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
@@ -266,6 +253,12 @@ export default function VaultsPage() {
                 <div>
                   <div className="font-bold text-[16px]">AutoSave Vault</div>
                   <div className="text-[12px] text-text-secondary">Save {autoSave.savePercent}% of every swap</div>
+                  {!vaultEnabled && (
+                    <div className="mt-1 inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-brand-gold/10 rounded-full text-[11px] text-brand-gold font-semibold">
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand-gold animate-pulse" />
+                      Switch to BSC Testnet to try AutoSave
+                    </div>
+                  )}
                 </div>
               </div>
               <button
@@ -347,7 +340,7 @@ export default function VaultsPage() {
           <BlinButton
             variant="gold" size="sm" className="h-9 px-4"
             onClick={openNewLock}
-            disabled={!vaultEnabled}
+            disabled={!vaultEnabled || !address}
           >
             <Plus size={16} className="mr-1" /> New Lock
           </BlinButton>
@@ -369,8 +362,8 @@ export default function VaultsPage() {
             <h3 className="font-display font-semibold text-[18px] text-text-primary mb-2">No locks yet</h3>
             <p className="text-[14px] text-text-secondary mb-6">
               {vaultEnabled
-                ? "Create a lock to save towards a goal and earn Aave yield while your funds are locked."
-                : "Vault contracts are being deployed. Check back soon."}
+                ? "Create a lock to save towards a goal and earn $BLIN yield while your funds are locked."
+                : "Switch to BSC Testnet or Arbitrum Sepolia to create savings locks and earn $BLIN rewards."}
             </p>
             {vaultEnabled && (
               <BlinButton variant="gold" onClick={openNewLock}>
@@ -525,8 +518,8 @@ export default function VaultsPage() {
         )}
       </section>
 
-      {/* Create Lock FAB (mobile) */}
-      {vaultEnabled && (
+      {/* Create Lock FAB (mobile) — only when contracts deployed on this chain */}
+      {vaultEnabled && address && (
         <div className="fixed bottom-[80px] left-4 right-4 md:hidden z-20">
           <BlinButton variant="gold" className="w-full shadow-lg" onClick={openNewLock}>
             <Lock size={18} className="mr-2" /> Create a New Lock

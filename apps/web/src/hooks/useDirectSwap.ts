@@ -4,51 +4,60 @@ import { useState, useCallback } from "react";
 import { useChainId, usePublicClient, useWalletClient } from "wagmi";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePrivy } from "@privy-io/react-auth";
-import { type Address, type Hash, type WalletClient, encodeFunctionData, parseAbi } from "viem";
+import {
+  type Address, type Hash, type WalletClient,
+  encodeFunctionData, parseAbi, decodeEventLog,
+} from "viem";
 import { CONTRACT_ADDRESSES, TESTNET_CONTRACT_ADDRESSES } from "@blin/shared";
-import { AUTO_SAVE_VAULT_ABI, VAULT_FACTORY_ABI as _VF_ABI, ERC20_ABI } from "@blin/sdk";
+import {
+  AUTO_SAVE_VAULT_ABI, VAULT_FACTORY_ABI as _VF_ABI,
+  ERC20_ABI, SAVE_SWAP_ABI,
+} from "@blin/sdk";
 import { useVaultHistory } from "./useVaultHistory";
+import type { VaultHistoryEntry } from "./useVaultHistory";
 import type { QuoteResult } from "@blin/sdk";
 import type { Token } from "@/lib/tokens";
 import { NATIVE_ADDRESS } from "@/lib/tokens";
+import type { QueryClient } from "@tanstack/react-query";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WRAPPED_NATIVE: Record<number, Address> = {
-  1:      "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
-  56:     "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", // WBNB
-  42161:  "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", // WETH on Arb
+  1:      "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  56:     "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+  42161:  "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
   97:     "0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd",
   421614: "0x980B62Da83eFf3D4576C647993b0c1D7faf17c73",
 };
 
-// PancakeSwap V2 Router02 addresses
 const PANCAKE_V2_ROUTER: Record<number, Address> = {
   56: "0x10ED43C718714eb63d5aA57B78B54704E256024E",
   97: "0xD99D1c33F9fC3444f8101754aBC46c52416550D1",
 };
 
-// Uniswap V3 SwapRouter02 addresses (same on ETH + Arb)
 const UNISWAP_V3_ROUTER: Record<number, Address> = {
   1:      "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
   42161:  "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
-  421614: "0xC8c8c44Aa3b4107f90Cd893E4c142D349f50782d", // mock on Arb Sepolia
+  421614: "0xC8c8c44Aa3b4107f90Cd893E4c142D349f50782d",
 };
 
 const ASSET_SYMBOL: Record<number, string> = {
   1: "USDC", 56: "USDT", 42161: "USDC", 421614: "mUSDC", 97: "mUSDC",
 };
 
-// USDC addresses per chain
 const USDC_ADDRESS: Record<number, Address> = {
   1:      "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
   56:     "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
   42161:  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-  97:     "0xbA64B04909B38EeA5601E719bB71cC11cc26126B", // MockUSDC
-  421614: "0x8B919dA41B4296a796de3722519490CA6B2A788B", // MockUSDC
+  97:     "0xbA64B04909B38EeA5601E719bB71cC11cc26126B",
+  421614: "0x8B919dA41B4296a796de3722519490CA6B2A788B",
 };
 
-// ─── ABIs ────────────────────────────────────────────────────────────────────
+// EIP-7528 canonical sentinel for native BNB/ETH used by SaveSwap contract
+const NATIVE_SENTINEL = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" as Address;
+const ZERO_ADDR       = "0x0000000000000000000000000000000000000000" as Address;
+
+// ─── ABIs ─────────────────────────────────────────────────────────────────────
 
 const PANCAKE_V2_ABI = parseAbi([
   "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
@@ -63,7 +72,6 @@ const UNISWAP_V3_ABI = parseAbi([
   "function unwrapWETH9(uint256 amountMinimum, address recipient)",
 ]);
 
-// Use the exported ABI from SDK (already has getVault + getOrCreateVault)
 const VAULT_FACTORY_ABI = _VF_ABI;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -73,15 +81,15 @@ export interface DirectSwapParams {
   toToken:      Token;
   amountIn:     bigint;
   quote:        QuoteResult;
-  saveBps:      number;        // 0 = no autosave
-  lockDuration: bigint;        // seconds
+  saveBps:      number;
+  lockDuration: bigint;
 }
 
 export interface DirectSwapResult {
-  mainTxHash:  Hash;
-  saveTxHash?: Hash;
-  lockId?:     bigint;
-  savedUsdc?:  bigint;
+  mainTxHash:    Hash;
+  saveTxHash?:   Hash;
+  lockId?:       bigint;
+  savedUsdc?:    bigint;
   vaultAddress?: Address;
 }
 
@@ -94,9 +102,8 @@ export type SwapStep =
   | "locking"
   | "done";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Encode a Uniswap V3 multi-hop path: token0, fee0, token1, fee1, token2, ... */
 function encodeV3Path(tokens: Address[], fees: number[]): `0x${string}` {
   let hex = tokens[0]!.toLowerCase().slice(2);
   for (let i = 0; i < fees.length; i++) {
@@ -134,223 +141,404 @@ export function useDirectSwap() {
     async (params: DirectSwapParams): Promise<DirectSwapResult> => {
       const { fromToken, toToken, amountIn, quote, saveBps, lockDuration } = params;
 
-      if (!walletClient?.account || !publicClient) {
-        throw new Error("Wallet not connected");
-      }
+      if (!walletClient?.account || !publicClient) throw new Error("Wallet not connected");
 
       const userAddress = walletClient.account.address;
-      const deadline    = BigInt(Math.floor(Date.now() / 1000) + 600); // 10 min
+      const deadline    = BigInt(Math.floor(Date.now() / 1000) + 600);
       const wNative     = WRAPPED_NATIVE[chainId];
       const usdcAddr    = USDC_ADDRESS[chainId];
       const chainAddrs  = getChainAddresses(chainId);
 
       if (!wNative || !usdcAddr) throw new Error(`Chain ${chainId} not supported`);
 
-      // ── Determine DEX type ─────────────────────────────────────────────────
-      const isPancake   = chainId in PANCAKE_V2_ROUTER;
-      const isUniswapV3 = chainId in UNISWAP_V3_ROUTER && !isPancake;
-      const routerAddr  = (isPancake ? PANCAKE_V2_ROUTER[chainId] : UNISWAP_V3_ROUTER[chainId])!;
+      const saveSwapAddr = (chainAddrs as { saveSwap?: Address }).saveSwap ?? ZERO_ADDR;
+      const hasSaveSwap  = saveSwapAddr !== ZERO_ADDR;
+      const isNativeIn   = isNative(fromToken.address);
+      const isNativeOut  = isNative(toToken.address);
 
-      const isNativeIn  = isNative(fromToken.address);
-      const isNativeOut = isNative(toToken.address);
-
-      // ── Split amountIn: save portion is taken from amountIn proportionally ─
-      // e.g. saveBps=1000 → save 10% of tokenIn, swap remaining 90% normally
-      const saveBigInt      = BigInt(saveBps);
-      const saveAmountIn    = saveBps > 0 ? (amountIn * saveBigInt) / 10_000n : 0n;
-      const mainAmountIn    = amountIn - saveAmountIn;
-
-      // Proportional amountOutMin for main swap
-      const mainAmountOutMin = saveBps > 0
-        ? (quote.amountOutMin * (10_000n - saveBigInt)) / 10_000n
-        : quote.amountOutMin;
-
-      // ── 1. Approve router for full amountIn (ERC-20 only) ─────────────────
-      if (!isNativeIn) {
-        const allowance = await publicClient.readContract({
-          address:      fromToken.address as Address,
-          abi:          ERC20_ABI,
-          functionName: "allowance",
-          args:         [userAddress, routerAddr],
-        }) as bigint;
-
-        if (allowance < amountIn) {
-          setStep("approving");
-          const { request } = await publicClient.simulateContract({
-            address:      fromToken.address as Address,
-            abi:          ERC20_ABI,
-            functionName: "approve",
-            args:         [routerAddr, amountIn],
-            account:      userAddress,
-          });
-          const approveHash = await walletClient.writeContract(request);
-          await publicClient.waitForTransactionReceipt({ hash: approveHash });
-        }
-      }
-
-      // ── 2. Execute main swap ───────────────────────────────────────────────
-      setStep("swapping");
-      let mainTxHash: Hash;
-
-      if (isPancake) {
-        mainTxHash = await _pancakeSwap({
-          publicClient, walletClient, routerAddr,
-          amountIn: mainAmountIn, amountOutMin: mainAmountOutMin,
-          fromToken, toToken, wNative, userAddress, deadline,
-          isNativeIn, isNativeOut,
-        });
-      } else {
-        mainTxHash = await _uniswapV3Swap({
-          publicClient, walletClient, routerAddr,
-          amountIn: mainAmountIn, amountOutMin: mainAmountOutMin,
-          fromToken, toToken, wNative, userAddress, deadline,
-          fee: quote.fee ?? 3_000,
-          isNativeIn, isNativeOut,
+      // ─── Single-transaction path via SaveSwap (testnet) ───────────────────
+      if (hasSaveSwap) {
+        return await _executeViaSaveSwap({
+          publicClient, walletClient, saveSwapAddr,
+          fromToken, toToken, amountIn, quote, saveBps, lockDuration,
+          wNative, usdcAddr, isNativeIn, isNativeOut, userAddress, deadline,
+          chainId, setStep, queryClient, addEntry,
         });
       }
 
-      await publicClient.waitForTransactionReceipt({ hash: mainTxHash });
-
-      // ── 3. AutoSave: swap save portion → USDC ──────────────────────────────
-      if (saveAmountIn === 0n) {
-        setStep("done");
-        return { mainTxHash };
-      }
-
-      setStep("saving");
-
-      // If tokenIn is already USDC, skip the swap
-      const tokenInIsUsdc = fromToken.address.toLowerCase() === usdcAddr.toLowerCase();
-      let savedUsdc        = tokenInIsUsdc ? saveAmountIn : 0n;
-      let saveTxHash: Hash | undefined;
-
-      if (!tokenInIsUsdc) {
-        // Swap saveAmountIn tokenIn → USDC → user's wallet
-        if (isPancake) {
-          saveTxHash = await _pancakeSaveSwap({
-            publicClient, walletClient, routerAddr,
-            saveAmountIn, fromToken, usdcAddr, wNative,
-            userAddress, deadline, isNativeIn,
-          });
-        } else {
-          saveTxHash = await _uniswapV3SaveSwap({
-            publicClient, walletClient, routerAddr,
-            saveAmountIn, fromToken, usdcAddr, wNative,
-            userAddress, deadline,
-            fee: quote.fee ?? 3_000, isNativeIn,
-          });
-        }
-
-        const receipt = await publicClient.waitForTransactionReceipt({ hash: saveTxHash });
-        // Estimate saved USDC from receipt (we don't parse events for simplicity)
-        // Use the rough estimate: saveAmountIn * quote.amountOut / mainAmountIn (but cap)
-        const ratio = mainAmountIn > 0n
-          ? (saveAmountIn * quote.amountOut) / mainAmountIn
-          : 0n;
-        savedUsdc = ratio;
-        void receipt;
-      }
-
-      // ── 4. If vault factory deployed, create lock ──────────────────────────
-      const factoryAddr = (chainAddrs as { vaultFactory?: Address }).vaultFactory
-        ?? "0x0000000000000000000000000000000000000000" as Address;
-
-      const ZERO = "0x0000000000000000000000000000000000000000" as Address;
-      let lockId: bigint | undefined;
-      let vaultAddress: Address | undefined;
-
-      if (factoryAddr !== ZERO && savedUsdc > 0n) {
-        try {
-          // Get or create the user's vault
-          setStep("saving");
-          const { request: createReq } = await publicClient.simulateContract({
-            address:      factoryAddr,
-            abi:          VAULT_FACTORY_ABI,
-            functionName: "getOrCreateVault",
-            args:         [userAddress],
-            account:      userAddress,
-          });
-          const vaultCreationTx = await walletClient.writeContract(createReq);
-          await publicClient.waitForTransactionReceipt({ hash: vaultCreationTx });
-
-          vaultAddress = await publicClient.readContract({
-            address:      factoryAddr,
-            abi:          VAULT_FACTORY_ABI,
-            functionName: "getVault",
-            args:         [userAddress],
-          }) as Address;
-
-          if (vaultAddress && vaultAddress !== ZERO) {
-            // Approve vault to spend USDC
-            setStep("approving-vault");
-            const usdcAllowance = await publicClient.readContract({
-              address:      usdcAddr,
-              abi:          ERC20_ABI,
-              functionName: "allowance",
-              args:         [userAddress, vaultAddress],
-            }) as bigint;
-
-            if (usdcAllowance < savedUsdc) {
-              const { request: approveVaultReq } = await publicClient.simulateContract({
-                address:      usdcAddr,
-                abi:          ERC20_ABI,
-                functionName: "approve",
-                args:         [vaultAddress, savedUsdc],
-                account:      userAddress,
-              });
-              const approveVaultTx = await walletClient.writeContract(approveVaultReq);
-              await publicClient.waitForTransactionReceipt({ hash: approveVaultTx });
-            }
-
-            // Create the lock
-            setStep("locking");
-            const lockName = "0x4175746f5361766500000000000000000000000000000000000000000000000000" as `0x${string}`; // "AutoSave"
-            const { request: lockReq } = await publicClient.simulateContract({
-              address:      vaultAddress,
-              abi:          AUTO_SAVE_VAULT_ABI,
-              functionName: "createLock",
-              args:         [savedUsdc, lockDuration, lockName as `0x${string}`],
-              account:      userAddress,
-            });
-            const lockTx   = await walletClient.writeContract(lockReq);
-            await publicClient.waitForTransactionReceipt({ hash: lockTx });
-            lockId = 0n; // we don't parse the event for lockId here
-
-            // Record in vault history
-            const savedHuman = savedUsdc > 0n
-              ? (Number(savedUsdc) / 10 ** (chainId === 56 ? 18 : 6)).toFixed(2)
-              : "0";
-            addEntry({
-              action:  "swap-save",
-              txHash:  lockTx,
-              amount:  savedHuman,
-              symbol:  ASSET_SYMBOL[chainId] ?? "USDC",
-              chainId,
-            });
-
-            // Bust the vault page cache so locks appear immediately
-            queryClient.invalidateQueries({ queryKey: ["vaultLocks"] });
-            queryClient.invalidateQueries({ queryKey: ["vaultAddress"] });
-          }
-        } catch (vaultErr) {
-          // Non-fatal: USDC is already in user's wallet; vault step just failed
-          console.warn("[useDirectSwap] Vault lock failed (non-fatal):", vaultErr);
-        }
-      }
-
-      setStep("done");
-      return {
-        mainTxHash,
-        ...(saveTxHash   !== undefined ? { saveTxHash }   : {}),
-        ...(lockId       !== undefined ? { lockId }       : {}),
-        ...(savedUsdc    !== undefined ? { savedUsdc }    : {}),
-        ...(vaultAddress !== undefined ? { vaultAddress } : {}),
-      };
+      // ─── Multi-step fallback (mainnet — contracts not yet deployed) ────────
+      return await _executeMultiStep({
+        publicClient, walletClient, chainId, chainAddrs,
+        fromToken, toToken, amountIn, quote, saveBps, lockDuration,
+        wNative, usdcAddr, isNativeIn, isNativeOut, userAddress, deadline,
+        setStep, queryClient, addEntry,
+      });
     },
     [chainId, publicClient, walletClient, user, queryClient, addEntry],
   );
 
   return { executeDirectSwap, step, isExecuting: step !== "idle" && step !== "done" };
+}
+
+// ─── Single-tx SaveSwap path ──────────────────────────────────────────────────
+//
+// For native BNB input:  1 transaction total (no approval needed)
+// For ERC-20 input:      approve SaveSwap (one-time) + swapAndSave = at most 2 txns
+//
+// SaveSwap handles everything atomically:
+//   tokenIn → PancakeSwap V2 → split → saveAmount → USDC → vault.createLockFor()
+//                                     → userAmount → msg.sender
+
+interface SaveSwapCallArgs {
+  publicClient:  ReturnType<typeof usePublicClient>;
+  walletClient:  WalletClient;
+  saveSwapAddr:  Address;
+  fromToken:     Token;
+  toToken:       Token;
+  amountIn:      bigint;
+  quote:         QuoteResult;
+  saveBps:       number;
+  lockDuration:  bigint;
+  wNative:       Address;
+  usdcAddr:      Address;
+  isNativeIn:    boolean;
+  isNativeOut:   boolean;
+  userAddress:   Address;
+  deadline:      bigint;
+  chainId:       number;
+  setStep:       (s: SwapStep) => void;
+  queryClient:   QueryClient;
+  addEntry:      (e: Omit<VaultHistoryEntry, "id" | "timestamp">) => void;
+}
+
+async function _executeViaSaveSwap({
+  publicClient, walletClient, saveSwapAddr,
+  fromToken, toToken, amountIn, quote, saveBps, lockDuration,
+  wNative, usdcAddr, isNativeIn, isNativeOut, userAddress, deadline,
+  chainId, setStep, queryClient, addEntry,
+}: SaveSwapCallArgs): Promise<DirectSwapResult> {
+
+  // ── Build PancakeSwap V2 paths ──────────────────────────────────────────
+  // pathMain: the main swap path (tokenIn → tokenOut)
+  const tIn  = isNativeIn  ? wNative : fromToken.address as Address;
+  const tOut = isNativeOut ? wNative : toToken.address   as Address;
+
+  const pathMain: Address[] = tIn.toLowerCase() === tOut.toLowerCase()
+    ? [tIn, tOut]           // same token edge case
+    : [tIn, tOut];          // direct pair; PancakeSwap reverts if no liquidity
+
+  // pathSave: save portion → USDC
+  // Leave empty when tokenOut is already USDC (no conversion needed)
+  const tokenOutIsUsdc = tOut.toLowerCase() === usdcAddr.toLowerCase();
+  let pathSave: Address[] = [];
+  if (!tokenOutIsUsdc && saveBps > 0) {
+    pathSave = tOut.toLowerCase() === wNative.toLowerCase()
+      ? [wNative, usdcAddr]          // WBNB → USDC
+      : [tOut, wNative, usdcAddr];   // token → WBNB → USDC
+  }
+
+  // SaveSwap uses EIP-7528 sentinel for native; frontend uses NATIVE_ADDRESS
+  const saveTokenIn  = isNativeIn  ? NATIVE_SENTINEL : fromToken.address as Address;
+  const saveTokenOut = isNativeOut ? NATIVE_SENTINEL : toToken.address   as Address;
+
+  // ── Approve SaveSwap to pull ERC-20 input (one-time setup) ─────────────
+  if (!isNativeIn) {
+    const allowance = await publicClient!.readContract({
+      address:      fromToken.address as Address,
+      abi:          ERC20_ABI,
+      functionName: "allowance",
+      args:         [userAddress, saveSwapAddr],
+    }) as bigint;
+
+    if (allowance < amountIn) {
+      setStep("approving");
+      const { request } = await publicClient!.simulateContract({
+        address:      fromToken.address as Address,
+        abi:          ERC20_ABI,
+        functionName: "approve",
+        args:         [saveSwapAddr, amountIn],
+        account:      userAddress,
+      });
+      const approveHash = await walletClient.writeContract(request);
+      await publicClient!.waitForTransactionReceipt({ hash: approveHash });
+    }
+  }
+
+  // ── Execute swapAndSave — ONE transaction ───────────────────────────────
+  setStep("swapping");
+
+  const swapParams = {
+    tokenIn:      saveTokenIn,
+    tokenOut:     saveTokenOut,
+    amountIn:     isNativeIn ? 0n : amountIn,  // contract uses msg.value when native
+    minAmountOut: quote.amountOutMin,
+    saveBps:      BigInt(saveBps),
+    minSaveUsdc:  0n,   // skip slippage on save leg for simplicity
+    lockDuration: saveBps > 0 ? lockDuration : 0n,
+    pathMain,
+    pathSave,
+    deadline,
+  };
+
+  const { request } = await publicClient!.simulateContract({
+    address:      saveSwapAddr,
+    abi:          SAVE_SWAP_ABI,
+    functionName: "swapAndSave",
+    args:         [swapParams],
+    account:      userAddress,
+    value:        isNativeIn ? amountIn : 0n,
+  });
+  const txHash  = await walletClient.writeContract(request);
+  const receipt = await publicClient!.waitForTransactionReceipt({ hash: txHash });
+
+  // ── Parse SwapAndSaved event for lockId + usdcSaved ─────────────────────
+  let lockId:    bigint | undefined;
+  let savedUsdc: bigint | undefined;
+
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi:       SAVE_SWAP_ABI,
+        eventName: "SwapAndSaved",
+        data:      log.data,
+        topics:    log.topics,
+      });
+      lockId    = decoded.args.lockId;
+      savedUsdc = decoded.args.usdcSaved;
+      break;
+    } catch { /* not our event — skip */ }
+  }
+
+  // ── Record in vault history ──────────────────────────────────────────────
+  if (saveBps > 0 && savedUsdc !== undefined && savedUsdc > 0n) {
+    const decimals   = chainId === 56 ? 18 : 6;
+    const savedHuman = (Number(savedUsdc) / 10 ** decimals).toFixed(2);
+    addEntry({
+      action:  "swap-save",
+      txHash,
+      amount:  savedHuman,
+      symbol:  ASSET_SYMBOL[chainId] ?? "USDC",
+      chainId,
+    });
+    queryClient.invalidateQueries({ queryKey: ["vaultLocks"] });
+    queryClient.invalidateQueries({ queryKey: ["vaultAddress"] });
+  }
+
+  setStep("done");
+  return {
+    mainTxHash: txHash,
+    ...(lockId    !== undefined ? { lockId }    : {}),
+    ...(savedUsdc !== undefined ? { savedUsdc } : {}),
+  };
+}
+
+// ─── Multi-step fallback (mainnet before contracts are deployed) ──────────────
+
+interface MultiStepArgs {
+  publicClient:  ReturnType<typeof usePublicClient>;
+  walletClient:  WalletClient;
+  chainId:       number;
+  chainAddrs:    ReturnType<typeof getChainAddresses>;
+  fromToken:     Token;
+  toToken:       Token;
+  amountIn:      bigint;
+  quote:         QuoteResult;
+  saveBps:       number;
+  lockDuration:  bigint;
+  wNative:       Address;
+  usdcAddr:      Address;
+  isNativeIn:    boolean;
+  isNativeOut:   boolean;
+  userAddress:   Address;
+  deadline:      bigint;
+  setStep:       (s: SwapStep) => void;
+  queryClient:   QueryClient;
+  addEntry:      (e: Omit<VaultHistoryEntry, "id" | "timestamp">) => void;
+}
+
+async function _executeMultiStep({
+  publicClient, walletClient, chainId, chainAddrs,
+  fromToken, toToken, amountIn, quote, saveBps, lockDuration,
+  wNative, usdcAddr, isNativeIn, isNativeOut, userAddress, deadline,
+  setStep, queryClient, addEntry,
+}: MultiStepArgs): Promise<DirectSwapResult> {
+
+  const isPancake   = chainId in PANCAKE_V2_ROUTER;
+  const isUniswapV3 = chainId in UNISWAP_V3_ROUTER && !isPancake;
+  const routerAddr  = (isPancake ? PANCAKE_V2_ROUTER[chainId] : UNISWAP_V3_ROUTER[chainId])!;
+
+  const saveBigInt       = BigInt(saveBps);
+  const saveAmountIn     = saveBps > 0 ? (amountIn * saveBigInt) / 10_000n : 0n;
+  const mainAmountIn     = amountIn - saveAmountIn;
+  const mainAmountOutMin = saveBps > 0
+    ? (quote.amountOutMin * (10_000n - saveBigInt)) / 10_000n
+    : quote.amountOutMin;
+
+  // ── Approve router for full amountIn (ERC-20 only) ─────────────────────
+  if (!isNativeIn) {
+    const allowance = await publicClient!.readContract({
+      address:      fromToken.address as Address,
+      abi:          ERC20_ABI,
+      functionName: "allowance",
+      args:         [userAddress, routerAddr],
+    }) as bigint;
+
+    if (allowance < amountIn) {
+      setStep("approving");
+      const { request } = await publicClient!.simulateContract({
+        address:      fromToken.address as Address,
+        abi:          ERC20_ABI,
+        functionName: "approve",
+        args:         [routerAddr, amountIn],
+        account:      userAddress,
+      });
+      const approveHash = await walletClient.writeContract(request);
+      await publicClient!.waitForTransactionReceipt({ hash: approveHash });
+    }
+  }
+
+  // ── Execute main swap ───────────────────────────────────────────────────
+  setStep("swapping");
+  let mainTxHash: Hash;
+
+  if (isPancake) {
+    mainTxHash = await _pancakeSwap({
+      publicClient, walletClient, routerAddr,
+      amountIn: mainAmountIn, amountOutMin: mainAmountOutMin,
+      fromToken, toToken, wNative, userAddress, deadline,
+      isNativeIn, isNativeOut,
+    });
+  } else {
+    mainTxHash = await _uniswapV3Swap({
+      publicClient, walletClient, routerAddr,
+      amountIn: mainAmountIn, amountOutMin: mainAmountOutMin,
+      fromToken, toToken, wNative, userAddress, deadline,
+      fee: quote.fee ?? 3_000,
+      isNativeIn, isNativeOut,
+    });
+  }
+
+  await publicClient!.waitForTransactionReceipt({ hash: mainTxHash });
+
+  if (saveAmountIn === 0n) {
+    setStep("done");
+    return { mainTxHash };
+  }
+
+  // ── Save portion → USDC (separate swap) ────────────────────────────────
+  setStep("saving");
+
+  const tokenInIsUsdc = fromToken.address.toLowerCase() === usdcAddr.toLowerCase();
+  let savedUsdc        = tokenInIsUsdc ? saveAmountIn : 0n;
+  let saveTxHash: Hash | undefined;
+
+  if (!tokenInIsUsdc) {
+    if (isPancake) {
+      saveTxHash = await _pancakeSaveSwap({
+        publicClient, walletClient, routerAddr,
+        saveAmountIn, fromToken, usdcAddr, wNative,
+        userAddress, deadline, isNativeIn,
+      });
+    } else {
+      saveTxHash = await _uniswapV3SaveSwap({
+        publicClient, walletClient, routerAddr,
+        saveAmountIn, fromToken, usdcAddr, wNative,
+        userAddress, deadline,
+        fee: quote.fee ?? 3_000, isNativeIn,
+      });
+    }
+
+    const receipt = await publicClient!.waitForTransactionReceipt({ hash: saveTxHash });
+    const ratio   = mainAmountIn > 0n ? (saveAmountIn * quote.amountOut) / mainAmountIn : 0n;
+    savedUsdc = ratio;
+    void receipt;
+  }
+
+  // ── Create vault lock ───────────────────────────────────────────────────
+  const factoryAddr = (chainAddrs as { vaultFactory?: Address }).vaultFactory ?? ZERO_ADDR;
+  let lockId:       bigint | undefined;
+  let vaultAddress: Address | undefined;
+
+  if (factoryAddr !== ZERO_ADDR && savedUsdc > 0n) {
+    try {
+      setStep("saving");
+      const { request: createReq } = await publicClient!.simulateContract({
+        address:      factoryAddr,
+        abi:          VAULT_FACTORY_ABI,
+        functionName: "getOrCreateVault",
+        args:         [userAddress],
+        account:      userAddress,
+      });
+      const vaultCreationTx = await walletClient.writeContract(createReq);
+      await publicClient!.waitForTransactionReceipt({ hash: vaultCreationTx });
+
+      vaultAddress = await publicClient!.readContract({
+        address:      factoryAddr,
+        abi:          VAULT_FACTORY_ABI,
+        functionName: "getVault",
+        args:         [userAddress],
+      }) as Address;
+
+      if (vaultAddress && vaultAddress !== ZERO_ADDR) {
+        setStep("approving-vault");
+        const usdcAllowance = await publicClient!.readContract({
+          address:      usdcAddr,
+          abi:          ERC20_ABI,
+          functionName: "allowance",
+          args:         [userAddress, vaultAddress],
+        }) as bigint;
+
+        if (usdcAllowance < savedUsdc) {
+          const { request: approveVaultReq } = await publicClient!.simulateContract({
+            address:      usdcAddr,
+            abi:          ERC20_ABI,
+            functionName: "approve",
+            args:         [vaultAddress, savedUsdc],
+            account:      userAddress,
+          });
+          const approveVaultTx = await walletClient.writeContract(approveVaultReq);
+          await publicClient!.waitForTransactionReceipt({ hash: approveVaultTx });
+        }
+
+        setStep("locking");
+        const { request: lockReq } = await publicClient!.simulateContract({
+          address:      vaultAddress,
+          abi:          AUTO_SAVE_VAULT_ABI,
+          functionName: "createLock",
+          args:         [savedUsdc, lockDuration, "0x4175746f53617665000000000000000000000000000000000000000000000000" as `0x${string}`],
+          account:      userAddress,
+        });
+        const lockTx = await walletClient.writeContract(lockReq);
+        await publicClient!.waitForTransactionReceipt({ hash: lockTx });
+        lockId = 0n;
+
+        const decimals   = chainId === 56 ? 18 : 6;
+        const savedHuman = (Number(savedUsdc) / 10 ** decimals).toFixed(2);
+        addEntry({
+          action:  "swap-save",
+          txHash:  lockTx,
+          amount:  savedHuman,
+          symbol:  ASSET_SYMBOL[chainId] ?? "USDC",
+          chainId,
+        });
+
+        queryClient.invalidateQueries({ queryKey: ["vaultLocks"] });
+        queryClient.invalidateQueries({ queryKey: ["vaultAddress"] });
+      }
+    } catch (vaultErr) {
+      // Non-fatal: USDC is in user's wallet; vault step failed
+      console.warn("[useDirectSwap] Vault lock failed (non-fatal):", vaultErr);
+    }
+  }
+
+  setStep("done");
+  return {
+    mainTxHash,
+    ...(saveTxHash   !== undefined ? { saveTxHash }   : {}),
+    ...(lockId       !== undefined ? { lockId }       : {}),
+    ...(savedUsdc    !== undefined ? { savedUsdc }    : {}),
+    ...(vaultAddress !== undefined ? { vaultAddress } : {}),
+  };
 }
 
 // ─── PancakeSwap V2 helpers ───────────────────────────────────────────────────
@@ -431,14 +619,12 @@ async function _pancakeSaveSwap({
   userAddress, deadline, isNativeIn,
 }: PancakeSaveArgs): Promise<Hash> {
   const tIn = isNativeIn ? wNative : fromToken.address as Address;
-
-  // Build path: tokenIn → WBNB → USDC (always routes via WBNB for reliability)
   const isAlreadyUsdc = tIn.toLowerCase() === usdcAddr.toLowerCase();
   if (isAlreadyUsdc) throw new Error("tokenIn is USDC — should not call save swap");
 
   const path: Address[] = tIn.toLowerCase() === wNative.toLowerCase()
-    ? [wNative, usdcAddr]           // WBNB → USDC direct
-    : [tIn, wNative, usdcAddr];     // token → WBNB → USDC
+    ? [wNative, usdcAddr]
+    : [tIn, wNative, usdcAddr];
 
   if (isNativeIn) {
     const { request } = await publicClient!.simulateContract({
@@ -489,7 +675,6 @@ async function _uniswapV3Swap({
   const tOut = isNativeOut ? wNative : toToken.address   as Address;
 
   if (isNativeOut) {
-    // Swap to WETH first, then unwrap — done via multicall
     const exactInputCalldata = encodeFunctionData({
       abi:          UNISWAP_V3_ABI,
       functionName: "exactInputSingle",
@@ -543,7 +728,6 @@ async function _uniswapV3SaveSwap({
 }: UniswapV3SaveArgs): Promise<Hash> {
   const tIn = isNativeIn ? wNative : fromToken.address as Address;
 
-  // If tokenIn is WETH: direct WETH → USDC (0.05% pool = fee 500)
   if (tIn.toLowerCase() === wNative.toLowerCase()) {
     const { request } = await publicClient!.simulateContract({
       address:      routerAddr,
@@ -556,7 +740,6 @@ async function _uniswapV3SaveSwap({
     return walletClient.writeContract(request);
   }
 
-  // Otherwise: tokenIn → WETH (using same fee tier as main swap) → USDC (500)
   const multihopPath = encodeV3Path([tIn, wNative, usdcAddr], [fee, 500]);
   const { request } = await publicClient!.simulateContract({
     address:      routerAddr,
