@@ -14,8 +14,7 @@ import { TokenIcon } from "@/components/ui/TokenIcon";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { useNotifications } from "@/components/notifications/NotificationContext";
 import { useSwapQuote } from "@/hooks/useSwapQuote";
-import { useBlinClient } from "@/hooks/useBlinClient";
-import { executeSwapWithSave } from "@blin/sdk";
+import { useDirectSwap } from "@/hooks/useDirectSwap";
 import { useBalances } from "@/hooks/useBalances";
 import { useNativeBalance } from "@/hooks/useNativeBalance";
 import { useTokenPrices } from "@/hooks/useTokenPrices";
@@ -63,7 +62,7 @@ export default function SwapPage() {
   const { addNotification }  = useNotifications();
   const wagmiChainId         = useChainId();
   const { address }          = useAuth();
-  const client               = useBlinClient();
+  const { executeDirectSwap, step: swapExecStep } = useDirectSwap();
 
   const chainId = isKnownChainId(wagmiChainId) ? wagmiChainId : 1;
 
@@ -158,7 +157,6 @@ export default function SwapPage() {
     savePercent:         savePercentage,
     setAutoSave:         setAutoSave,
     setSavePercent:      setSavePercentage,
-    contractsEnabled:    autoSaveContractsEnabled,
     lockDurationSeconds,
   } = useAutoSaveConfig();
 
@@ -238,73 +236,53 @@ export default function SwapPage() {
     if (!quote || !address) return;
     setSwapState("loading");
     try {
-      if (autoSaveContractsEnabled && client?.walletClient) {
-        // ── Real on-chain swap via SaveSwap contract ────────────────────────
-        const amountIn = parseUnits(fromAmount, fromToken.decimals);
-        const deadline = BigInt(Math.floor(Date.now() / 1000) + 300); // 5 min
+      const amountIn = parseUnits(fromAmount, fromToken.decimals);
+      const saveBps  = autoSave ? savePercentage * 100 : 0;
 
-        const swapResult = await executeSwapWithSave(client, {
-          quote,
-          saveBps:      autoSave ? savePercentage * 100 : 0,
-          deadline,
-          tokenIn:      fromToken.address,
-          tokenOut:     toToken.address,
-          amountIn,
-          lockDuration: lockDurationSeconds,
-        });
+      const result = await executeDirectSwap({
+        fromToken,
+        toToken,
+        amountIn,
+        quote,
+        saveBps,
+        lockDuration: lockDurationSeconds,
+      });
 
-        if (swapResult.isErr()) throw swapResult.error;
-        const { lockId } = swapResult.value;
+      setSwapState("success");
+      addNotification({
+        title:   "Swap Successful!",
+        message: `Swapped ${fromAmount} ${fromToken.symbol} → ${fmt(toAmount, 4)} ${toToken.symbol} via ${providerLabel ?? "DEX"}.`,
+        type:    "success",
+      });
 
-        setSwapState("success");
-        addNotification({
-          title:   "Swap Successful!",
-          message: `Swapped ${fromAmount} ${fromToken.symbol} → ${fmt(toAmount, 4)} ${toToken.symbol}.`,
-          type:    "success",
-        });
-
-        // Show AutoSave notification only when a lock was actually created
-        // (lockId === type(uint256).max means saveBps=0 or saveAmount rounded to 0)
-        const noLock = lockId === (2n ** 256n - 1n);
-        if (autoSave && !noLock) {
-          const savedAmt = parseFloat(toAmount ?? "0") * (savePercentage / 100);
+      if (autoSave && saveBps > 0) {
+        const savedPct = savePercentage;
+        if (result.vaultAddress && result.vaultAddress !== "0x0000000000000000000000000000000000000000") {
           addNotification({
-            title:   "AutoSave Vault",
-            message: `${fmt(savedAmt, 4)} ${toToken.symbol} auto-saved → Lock #${lockId}.`,
+            title:   "AutoSave Locked!",
+            message: `${savedPct}% converted to USDC and locked in your vault.`,
             type:    "success",
           });
-        }
-      } else {
-        // ── Simulation fallback (contracts not yet deployed on this chain) ──
-        await new Promise<void>((res) => setTimeout(res, 2000));
-        setSwapState("success");
-        addNotification({
-          title:   "Swap Successful!",
-          message: `Swapped ${fromAmount} ${fromToken.symbol} → ${fmt(toAmount, 4)} ${toToken.symbol} via ${providerLabel ?? "aggregator"}.`,
-          type:    "success",
-        });
-        if (autoSave) {
-          const saved = parseFloat(toAmount ?? "0") * (savePercentage / 100);
+        } else {
           addNotification({
-            title:   "AutoSave Vault",
-            message: `${fmt(saved, 4)} ${toToken.symbol} auto-saved.`,
-            type:    "success",
+            title:   "AutoSave — USDC Saved",
+            message: `${savedPct}% converted to USDC in your wallet. Vault deploying soon.`,
+            type:    "info",
           });
         }
       }
+
       setTimeout(() => { setSwapState("idle"); setFromAmount(""); }, 3000);
     } catch (err: unknown) {
       setSwapState("idle");
-      addNotification({
-        title:   "Swap Failed",
-        message: err instanceof Error ? err.message : "Transaction rejected.",
-        type:    "alert",
-      });
+      const msg = err instanceof Error ? err.message : "Transaction rejected or cancelled.";
+      addNotification({ title: "Swap Failed", message: msg, type: "alert" });
     }
   }, [
     quote, fromAmount, toAmount, fromToken, toToken,
-    address, client, autoSave, autoSaveContractsEnabled,
-    savePercentage, lockDurationSeconds, providerLabel, addNotification,
+    address, autoSave, savePercentage,
+    lockDurationSeconds, providerLabel, addNotification,
+    executeDirectSwap,
   ]);
 
   // ── Derived display ───────────────────────────────────────────────────────
@@ -690,7 +668,12 @@ export default function SwapPage() {
           </BlinButton>
         ) : swapState === "loading" ? (
           <BlinButton variant="gold" className="w-full h-[64px] rounded-3xl" isLoading>
-            Routing swap…
+            {swapExecStep === "approving"      && "Approving token…"}
+            {swapExecStep === "swapping"       && "Swapping…"}
+            {swapExecStep === "saving"         && "Converting to USDC…"}
+            {swapExecStep === "approving-vault"&& "Approving vault…"}
+            {swapExecStep === "locking"        && "Locking in vault…"}
+            {(swapExecStep === "idle" || swapExecStep === "done") && "Processing…"}
           </BlinButton>
         ) : swapState === "success" ? (
           <BlinButton className="w-full h-[64px] rounded-3xl bg-brand-green shadow-xl shadow-brand-green/20 ring-4 ring-brand-green/10">

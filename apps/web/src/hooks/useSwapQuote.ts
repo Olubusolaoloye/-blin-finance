@@ -98,6 +98,7 @@ export function useSwapQuote({
         gasEstimate:    0n,
         priceImpactBps: 0,
         provider:       json.provider as QuoteResult["provider"],
+        ...(json.fee !== undefined ? { fee: json.fee } : {}),
       };
     },
     enabled,

@@ -31,6 +31,8 @@ export interface QuoteResult {
   priceImpactBps: number;
   /** DEX that provided the quote. */
   provider: "uniswap-v3" | "pancakeswap-v2" | "mock" | string;
+  /** Uniswap V3 fee tier used for this quote (100 / 500 / 3000 / 10000). */
+  fee?: number;
 }
 
 export interface RouteStep {
