@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { formatUnits } from "viem";
 import { NATIVE_ADDRESS } from "@/lib/tokens";
 import { useBalances } from "./useBalances";
+import { useCustomTokens } from "./useCustomTokens";
 
 // Always show ETH (1) + BNB (56) regardless of which chain the wallet is connected to.
 const PORTFOLIO_CHAINS = [1, 56] as const;
@@ -113,12 +114,20 @@ export function usePortfolio(): PortfolioResult {
     return 0;
   }
 
+  // Custom tokens the user has added per chain (persisted in localStorage)
+  const { customTokens: customEth } = useCustomTokens(1);
+  const { customTokens: customBsc } = useCustomTokens(56);
+  const extraTokens = useMemo(
+    () => [...customEth, ...customBsc],
+    [customEth, customBsc],
+  );
+
   // ── ERC-20 balances across ETH + BNB ─────────────────────────────────────
   const {
     allTokens,
     isLoading:  balLoading,
     isFetching: balFetching,
-  } = useBalances([...PORTFOLIO_CHAINS]);
+  } = useBalances([...PORTFOLIO_CHAINS], extraTokens);
 
   // ── Native balances ───────────────────────────────────────────────────────
   const { data: ethBal, isLoading: ethLoading } = useBalance({ address, chainId: 1  });

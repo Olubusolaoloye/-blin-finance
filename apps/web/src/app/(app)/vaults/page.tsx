@@ -4,7 +4,8 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   PiggyBank, Lock, Plus, CheckCircle2, Settings,
-  ChevronRight, Loader2, RefreshCw, Droplets,
+  Loader2, RefreshCw, Droplets, History,
+  ArrowDownCircle, ArrowUpCircle, TrendingUp, Scissors, Zap,
 } from "lucide-react";
 import { useAccount } from "wagmi";
 import { formatUnits } from "viem";
@@ -20,6 +21,8 @@ import { BottomSheet }   from "@/components/ui/BottomSheet";
 import { useVaultData }      from "@/hooks/useVaultData";
 import { useVaultMutations } from "@/hooks/useVaultMutations";
 import { useAutoSaveConfig } from "@/hooks/useAutoSaveConfig";
+import { useVaultHistory }   from "@/hooks/useVaultHistory";
+import type { VaultHistoryAction } from "@/hooks/useVaultHistory";
 
 // ─── Duration presets ─────────────────────────────────────────────────────────
 
@@ -57,11 +60,37 @@ function estimatedYield(amount: bigint, decimals: number, durationSecs: bigint):
 // Testnets that show the faucet button
 const TESTNET_CHAIN_IDS = new Set([421614, 97]);
 
+// ─── History helpers ──────────────────────────────────────────────────────────
+
+function historyActionLabel(action: VaultHistoryAction): string {
+  const map: Record<VaultHistoryAction, string> = {
+    create:    "Lock Created",
+    topup:     "Top Up",
+    withdraw:  "Withdrawn",
+    break:     "Lock Broken",
+    "swap-save": "AutoSave",
+  };
+  return map[action];
+}
+
+function HistoryIcon({ action }: { action: VaultHistoryAction }) {
+  const props = { size: 16, strokeWidth: 2.5 };
+  if (action === "create")     return <TrendingUp  {...props} className="text-brand-green" />;
+  if (action === "topup")      return <Plus         {...props} className="text-brand-blue"  />;
+  if (action === "withdraw")   return <ArrowUpCircle {...props} className="text-brand-gold"  />;
+  if (action === "break")      return <Scissors     {...props} className="text-brand-red"   />;
+  if (action === "swap-save")  return <Zap          {...props} className="text-brand-gold"  />;
+  return <ArrowDownCircle {...props} className="text-text-muted" />;
+}
+
+// ─── Page component ───────────────────────────────────────────────────────────
+
 export default function VaultsPage() {
   const vaultData  = useVaultData();
   const autoSave   = useAutoSaveConfig();
-  const { chainId } = useAccount();
+  const { chainId, address } = useAccount();
   const isTestnet   = chainId !== undefined && TESTNET_CHAIN_IDS.has(chainId);
+  const { entries: historyEntries } = useVaultHistory(chainId ?? 1, address);
 
   const {
     vaultEnabled,
@@ -438,6 +467,62 @@ export default function VaultsPage() {
             );
           })}
         </div>
+      </section>
+
+      {/* ── Transaction History ───────────────────────────────────────────── */}
+      <section>
+        <div className="flex items-center gap-2 mb-4">
+          <History size={18} className="text-text-secondary" />
+          <h2 className="font-bold text-[18px] text-text-primary">Transaction History</h2>
+        </div>
+
+        {historyEntries.length === 0 ? (
+          <BlinCard className="text-center p-6">
+            <History size={32} className="mx-auto mb-3 text-border-medium" />
+            <p className="text-[14px] text-text-secondary">No transactions yet.</p>
+            <p className="text-[12px] text-text-muted mt-1">
+              Your vault activity will appear here after your first action.
+            </p>
+          </BlinCard>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {historyEntries.map((entry) => (
+              <BlinCard key={entry.id} className="p-4 flex items-center gap-4">
+                <div className="w-9 h-9 rounded-full bg-surface-raised flex items-center justify-center shrink-0">
+                  <HistoryIcon action={entry.action} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-[14px] text-text-primary">
+                    {historyActionLabel(entry.action)}
+                    {entry.lockName && (
+                      <span className="ml-1.5 text-[12px] text-text-muted font-normal">
+                        "{entry.lockName}"
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[12px] text-text-muted">
+                    {new Date(entry.timestamp).toLocaleDateString("en-US", {
+                      month: "short", day: "numeric", year: "numeric",
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  {entry.amount !== "—" && (
+                    <div className="font-bold text-[14px] text-text-primary">
+                      {entry.amount} <span className="text-text-muted font-normal text-[12px]">{entry.symbol}</span>
+                    </div>
+                  )}
+                  {entry.txHash && (
+                    <div className="text-[11px] font-mono text-brand-blue">
+                      {entry.txHash.slice(0, 6)}…{entry.txHash.slice(-4)}
+                    </div>
+                  )}
+                </div>
+              </BlinCard>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Create Lock FAB (mobile) */}

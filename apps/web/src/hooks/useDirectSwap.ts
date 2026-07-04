@@ -2,10 +2,12 @@
 
 import { useState, useCallback } from "react";
 import { useChainId, usePublicClient, useWalletClient } from "wagmi";
+import { useQueryClient } from "@tanstack/react-query";
 import { usePrivy } from "@privy-io/react-auth";
 import { type Address, type Hash, type WalletClient, encodeFunctionData, parseAbi } from "viem";
 import { CONTRACT_ADDRESSES, TESTNET_CONTRACT_ADDRESSES } from "@blin/shared";
 import { AUTO_SAVE_VAULT_ABI, VAULT_FACTORY_ABI as _VF_ABI, ERC20_ABI } from "@blin/sdk";
+import { useVaultHistory } from "./useVaultHistory";
 import type { QuoteResult } from "@blin/sdk";
 import type { Token } from "@/lib/tokens";
 import { NATIVE_ADDRESS } from "@/lib/tokens";
@@ -31,6 +33,10 @@ const UNISWAP_V3_ROUTER: Record<number, Address> = {
   1:      "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
   42161:  "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
   421614: "0xC8c8c44Aa3b4107f90Cd893E4c142D349f50782d", // mock on Arb Sepolia
+};
+
+const ASSET_SYMBOL: Record<number, string> = {
+  1: "USDC", 56: "USDT", 42161: "USDC", 421614: "mUSDC", 97: "mUSDC",
 };
 
 // USDC addresses per chain
@@ -119,6 +125,8 @@ export function useDirectSwap() {
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { user } = usePrivy();
+  const queryClient  = useQueryClient();
+  const { addEntry } = useVaultHistory(chainId, walletClient?.account?.address);
 
   const [step, setStep] = useState<SwapStep>("idle");
 
@@ -305,9 +313,24 @@ export function useDirectSwap() {
               account:      userAddress,
             });
             const lockTx   = await walletClient.writeContract(lockReq);
-            const lockReceipt = await publicClient.waitForTransactionReceipt({ hash: lockTx });
-            void lockReceipt;
+            await publicClient.waitForTransactionReceipt({ hash: lockTx });
             lockId = 0n; // we don't parse the event for lockId here
+
+            // Record in vault history
+            const savedHuman = savedUsdc > 0n
+              ? (Number(savedUsdc) / 10 ** (chainId === 56 ? 18 : 6)).toFixed(2)
+              : "0";
+            addEntry({
+              action:  "swap-save",
+              txHash:  lockTx,
+              amount:  savedHuman,
+              symbol:  ASSET_SYMBOL[chainId] ?? "USDC",
+              chainId,
+            });
+
+            // Bust the vault page cache so locks appear immediately
+            queryClient.invalidateQueries({ queryKey: ["vaultLocks"] });
+            queryClient.invalidateQueries({ queryKey: ["vaultAddress"] });
           }
         } catch (vaultErr) {
           // Non-fatal: USDC is already in user's wallet; vault step just failed
@@ -324,7 +347,7 @@ export function useDirectSwap() {
         ...(vaultAddress !== undefined ? { vaultAddress } : {}),
       };
     },
-    [chainId, publicClient, walletClient, user],
+    [chainId, publicClient, walletClient, user, queryClient, addEntry],
   );
 
   return { executeDirectSwap, step, isExecuting: step !== "idle" && step !== "done" };

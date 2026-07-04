@@ -1,65 +1,110 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { useAccount } from "wagmi";
-import { useBlinClient } from "./useBlinClient";
-import { getBalances } from "@blin/sdk";
-import type { PortfolioBalances } from "@blin/sdk";
+import { useMemo } from "react";
+import { useAccount, useReadContracts } from "wagmi";
+import { erc20Abi } from "viem";
+import type { Address } from "viem";
+import { TOKENS_BY_CHAIN, NATIVE_ADDRESS } from "@/lib/tokens";
+import type { Token } from "@/lib/tokens";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface LiveTokenBalance {
+  address:  Address;
+  symbol:   string;
+  name:     string;
+  decimals: number;
+  balance:  bigint;
+  usdValue: number;  // always 0 — prices computed in usePortfolio / useTokenPrices
+  chainId?: number;
+}
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 /**
- * Fetches live ERC-20 + native token balances via the SDK (Alchemy → Moralis).
- * Supports mainnet and testnet chains.
+ * Reads live ERC-20 balances directly on-chain via wagmi multicall.
+ * No API keys required — works on all chains configured in wagmi.
+ *
+ * @param chains       Chain IDs to query (default: [1])
+ * @param extraTokens  Additional tokens to query (e.g. custom-added tokens)
  */
-export function useBalances(chains?: number[]) {
+export function useBalances(chains?: number[], extraTokens?: Token[]) {
   const { address } = useAccount();
-  const client       = useBlinClient();
 
-  const hasApiKeys = !!(
-    process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ||
-    process.env.NEXT_PUBLIC_MORALIS_API_KEY
-  );
+  const targetChains = useMemo(() => chains ?? [1], [chains]);
 
-  const targetChains: number[] = chains ??
-    (client?.chainId ? [client.chainId] : [1]);
+  // Flat, de-duplicated list of every ERC-20 to query across requested chains
+  const tokenList = useMemo<Token[]>(() => {
+    const seen   = new Set<string>();
+    const result: Token[] = [];
 
-  // Only run when we actually have API keys — otherwise saves an unnecessary round-trip
-  const enabled = !!address && !!client && hasApiKeys;
+    for (const chainId of targetChains) {
+      for (const t of TOKENS_BY_CHAIN[chainId] ?? []) {
+        if (t.isNative || t.address === NATIVE_ADDRESS) continue;
+        const key = `${chainId}:${t.address.toLowerCase()}`;
+        if (!seen.has(key)) { seen.add(key); result.push(t); }
+      }
+    }
 
-  const { data, isLoading, isFetching, isError } = useQuery<PortfolioBalances[]>({
-    queryKey: ["balances", address, targetChains.join(",")],
-    queryFn: async () => {
-      if (!client || !address) return [];
+    for (const t of extraTokens ?? []) {
+      if (t.isNative || t.address === NATIVE_ADDRESS) continue;
+      const key = `${t.chainId}:${t.address.toLowerCase()}`;
+      if (!seen.has(key)) { seen.add(key); result.push(t); }
+    }
 
-      const result = await getBalances(client, address as `0x${string}`, targetChains);
+    return result;
+  }, [targetChains, extraTokens]);
 
-      return result.match<PortfolioBalances[]>(
-        (balances) => balances,
-        (_err)    => [],
-      );
+  // Build wagmi multicall contracts — one balanceOf per token
+  const contracts = useMemo(() => {
+    if (!address) return [];
+    return tokenList.map((token) => ({
+      address:      token.address as Address,
+      abi:          erc20Abi,
+      functionName: "balanceOf" as const,
+      args:         [address] as const,
+      chainId:      token.chainId,
+    }));
+  }, [tokenList, address]);
+
+  const { data, isLoading, isFetching, isError } = useReadContracts({
+    contracts,
+    query: {
+      enabled:              !!address && contracts.length > 0,
+      staleTime:             30_000,
+      gcTime:               300_000,
+      refetchInterval:       60_000,
+      refetchOnWindowFocus:  false,
     },
-    enabled,
-    staleTime:            120_000,  // 2 min — balances don't change every second
-    gcTime:              600_000,   // 10 min in memory
-    refetchOnWindowFocus: false,    // prevent spam on tab switch
-    refetchInterval:     180_000,   // background refresh every 3 min
-    retry:               1,
   });
 
-  /** All token balances flattened from every fetched chain */
-  const allTokens = (data ?? []).flatMap((b) => b.tokens);
-
-  /** Total USD across all chains (0 when no API keys) */
-  const totalUsd = (data ?? []).reduce((sum, b) => sum + b.totalUsd, 0);
+  // Map results back to token metadata + balance; filter out zero balances
+  const allTokens = useMemo<LiveTokenBalance[]>(() => {
+    if (!data) return [];
+    return tokenList
+      .map((token, i) => {
+        const res     = data[i];
+        const balance = res?.status === "success" ? (res.result as bigint) : 0n;
+        return {
+          address:  token.address as Address,
+          symbol:   token.symbol,
+          name:     token.name,
+          decimals: token.decimals,
+          balance,
+          usdValue: 0,
+          chainId:  token.chainId,
+        };
+      })
+      .filter((t) => t.balance > 0n);
+  }, [data, tokenList]);
 
   return {
-    portfolios: data ?? [],
+    portfolios: [],         // kept for API compat
     allTokens,
-    totalUsd,
-    isLoading:  enabled ? isLoading  : false,
-    isFetching: enabled ? isFetching : false,
-    isError:    enabled ? isError    : false,
-    hasApiKeys,
+    totalUsd:   0,          // computed separately in usePortfolio
+    isLoading:  !!address && isLoading,
+    isFetching: !!address && isFetching,
+    isError:    !!address && isError,
+    hasApiKeys: true,       // kept for API compat; always true now
   };
 }

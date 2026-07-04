@@ -24,6 +24,7 @@ function getAddresses(chainId: number) {
 import { VAULT_FACTORY_ABI } from "@blin/sdk";
 import { useBlinClient } from "./useBlinClient";
 import { useNotifications } from "@/components/notifications/NotificationContext";
+import { useVaultHistory } from "./useVaultHistory";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,13 @@ export interface VaultMutationsResult {
   claimTestTokens:  ReturnType<typeof useMutation<void, Error, { vaultAddress: Address | null }>>;
 }
 
+const ASSET_SYMBOL: Record<number, string> = {
+  1: "USDC", 56: "USDT", 42161: "USDC", 421614: "mUSDC", 97: "mUSDC",
+};
+const ASSET_DECIMALS: Record<number, number> = {
+  1: 6, 56: 18, 42161: 6, 421614: 6, 97: 6,
+};
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useVaultMutations(vaultAddress: Address | null): VaultMutationsResult {
@@ -59,6 +67,9 @@ export function useVaultMutations(vaultAddress: Address | null): VaultMutationsR
 
   const chainId       = client?.chainId ?? 1;
   const factoryAddr   = getAddresses(chainId).vaultFactory as Address;
+  const assetSymbol   = ASSET_SYMBOL[chainId]   ?? "USDC";
+  const assetDecimals = ASSET_DECIMALS[chainId] ?? 6;
+  const { addEntry }  = useVaultHistory(chainId, address);
 
   // ── Helper: ensure vault exists, returning its REAL on-chain address ────
   //
@@ -123,16 +134,17 @@ export function useVaultMutations(vaultAddress: Address | null): VaultMutationsR
 
   // ── Create lock ───────────────────────────────────────────────────────────
   const createLock = useMutation<Address, Error, CreateLockParams>({
-    mutationFn: async ({ name, amount, lockDurationSeconds, assetDecimals }) => {
+    mutationFn: async ({ name, amount, lockDurationSeconds, assetDecimals: dec }) => {
       if (!client) throw new Error("Client not initialised");
-      const vault    = await ensureVault();
-      const amountWei = parseUnits(amount, assetDecimals);
-      await sdkCreateLock(client, {
+      const vault     = await ensureVault();
+      const amountWei = parseUnits(amount, dec);
+      const txHash    = await sdkCreateLock(client, {
         vaultAddress:        vault,
         amount:              amountWei,
         lockDurationSeconds,
         name,
       }).write();
+      addEntry({ action: "create", txHash, amount, symbol: assetSymbol, lockName: name, chainId });
       return vault;
     },
     onSuccess: () => {
@@ -147,13 +159,14 @@ export function useVaultMutations(vaultAddress: Address | null): VaultMutationsR
 
   // ── Top up ────────────────────────────────────────────────────────────────
   const topUp = useMutation<void, Error, { lockId: bigint; amount: string; vaultAddress: Address; assetDecimals: number }>({
-    mutationFn: async ({ lockId, amount, vaultAddress: vault, assetDecimals }) => {
+    mutationFn: async ({ lockId, amount, vaultAddress: vault, assetDecimals: dec }) => {
       if (!client) throw new Error("Client not initialised");
-      await sdkTopUp(client, {
+      const txHash = await sdkTopUp(client, {
         vaultAddress: vault,
         lockId,
-        amount: parseUnits(amount, assetDecimals),
+        amount: parseUnits(amount, dec),
       }).write();
+      addEntry({ action: "topup", txHash, amount, symbol: assetSymbol, lockId: lockId.toString(), chainId });
     },
     onSuccess: () => {
       addNotification({ title: "Top Up Successful!", message: "Funds added to your lock.", type: "success" });
@@ -168,7 +181,8 @@ export function useVaultMutations(vaultAddress: Address | null): VaultMutationsR
   const withdraw = useMutation<void, Error, { lockId: bigint; vaultAddress: Address }>({
     mutationFn: async ({ lockId, vaultAddress: vault }) => {
       if (!client) throw new Error("Client not initialised");
-      await sdkWithdraw(client, { vaultAddress: vault, lockId }).write();
+      const txHash = await sdkWithdraw(client, { vaultAddress: vault, lockId }).write();
+      addEntry({ action: "withdraw", txHash, amount: "—", symbol: assetSymbol, lockId: lockId.toString(), chainId });
     },
     onSuccess: () => {
       addNotification({ title: "Withdrawal Successful!", message: "Funds returned to your wallet.", type: "success" });
@@ -183,7 +197,8 @@ export function useVaultMutations(vaultAddress: Address | null): VaultMutationsR
   const breakLock = useMutation<void, Error, { lockId: bigint; vaultAddress: Address }>({
     mutationFn: async ({ lockId, vaultAddress: vault }) => {
       if (!client) throw new Error("Client not initialised");
-      await sdkBreakLock(client, { vaultAddress: vault, lockId }).write();
+      const txHash = await sdkBreakLock(client, { vaultAddress: vault, lockId }).write();
+      addEntry({ action: "break", txHash, amount: "—", symbol: assetSymbol, lockId: lockId.toString(), chainId });
     },
     onSuccess: () => {
       addNotification({ title: "Lock Broken", message: "Funds returned after 15% early-exit penalty.", type: "alert" });
