@@ -33,7 +33,7 @@ export default function Dashboard() {
     totalUsd,
     totalNgn,
     dayChangePct,
-    dayChangeUsd,
+    dayChangeNgn,
     isLoading: portfolioLoading,
     isFetching: portfolioFetching,
   } = usePortfolio();
@@ -109,7 +109,7 @@ export default function Dashboard() {
               )}
 
               <div className={`inline-flex items-center px-2 py-1 rounded-full text-[12px] font-semibold mb-6 ${dayChangePct >= 0 ? "bg-[#00C896]/15 text-brand-green" : "bg-brand-red/15 text-brand-red"}`}>
-                {dayChangePct >= 0 ? "+" : ""}₦{Math.abs(dayChangeUsd * 1580).toLocaleString(undefined, { maximumFractionDigits: 0 })} ({dayChangePct >= 0 ? "+" : ""}{dayChangePct.toFixed(2)}%) today
+                {dayChangePct >= 0 ? "+" : ""}₦{Math.abs(dayChangeNgn).toLocaleString(undefined, { maximumFractionDigits: 0 })} ({dayChangePct >= 0 ? "+" : ""}{dayChangePct.toFixed(2)}%) today
               </div>
 
               <div className="flex items-center gap-2 mb-8">
