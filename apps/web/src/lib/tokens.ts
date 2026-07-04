@@ -60,7 +60,7 @@ export const ARBITRUM_TOKENS: Token[] = [
 ];
 
 // ─── Arbitrum Sepolia testnet (chainId: 421614) ──────────────────────────────
-// Contracts deployed 2026-05-20 via DeployTestnet.s.sol
+// Deployed via DeployArbSepolia.s.sol
 
 export const ARB_SEPOLIA_TOKENS: Token[] = [
   {
@@ -70,8 +70,24 @@ export const ARB_SEPOLIA_TOKENS: Token[] = [
   },
   {
     symbol: "mUSDC", name: "Mock USDC (testnet)",
-    address: "0xbA64B04909B38EeA5601E719bB71cC11cc26126B",
+    address: "0x8B919dA41B4296a796de3722519490CA6B2A788B",
     decimals: 6,  chainId: 421614, isTestnet: true,
+  },
+];
+
+// ─── BSC Testnet (chainId: 97) ───────────────────────────────────────────────
+// Deployed via DeployTestnet.s.sol
+
+export const BSC_TESTNET_TOKENS: Token[] = [
+  {
+    symbol: "BNB",   name: "BNB (testnet)",
+    address: NATIVE_ADDRESS,
+    decimals: 18, chainId: 97, isNative: true, isTestnet: true,
+  },
+  {
+    symbol: "mUSDC", name: "Mock USDC (testnet)",
+    address: "0xbA64B04909B38EeA5601E719bB71cC11cc26126B",
+    decimals: 6,  chainId: 97, isTestnet: true,
   },
 ];
 
@@ -82,6 +98,7 @@ export const TOKENS_BY_CHAIN: Record<number, Token[]> = {
   56:     BSC_TOKENS,
   42161:  ARBITRUM_TOKENS,
   421614: ARB_SEPOLIA_TOKENS,
+  97:     BSC_TESTNET_TOKENS,
 };
 
 /** Popular tokens shown in the quick-select pill row */
@@ -90,6 +107,7 @@ export const POPULAR_SYMBOLS: Record<number, string[]> = {
   56:     ["BNB", "USDT", "USDC", "CAKE"],
   42161:  ["ETH", "USDT", "USDC", "WBTC"],
   421614: ["ETH", "mUSDC"],
+  97:     ["BNB", "mUSDC"],
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -121,7 +139,7 @@ export function getTokenByAddress(address: string, chainId: number): Token | und
 /** Default "pay" token for a given chain */
 export function defaultFromToken(chainId: number): Token {
   const symbol: Record<number, string> = {
-    1: "ETH", 56: "BNB", 42161: "ETH", 421614: "ETH",
+    1: "ETH", 56: "BNB", 42161: "ETH", 421614: "ETH", 97: "BNB",
   };
   return (
     getTokenBySymbol(symbol[chainId] ?? "ETH", chainId) ??
@@ -133,7 +151,7 @@ export function defaultFromToken(chainId: number): Token {
 /** Default "receive" token for a given chain */
 export function defaultToToken(chainId: number): Token {
   const symbol: Record<number, string> = {
-    1: "USDT", 56: "USDT", 42161: "USDT", 421614: "mUSDC",
+    1: "USDT", 56: "USDT", 42161: "USDT", 421614: "mUSDC", 97: "mUSDC",
   };
   return (
     getTokenBySymbol(symbol[chainId] ?? "USDT", chainId) ??
@@ -148,4 +166,5 @@ export const TOKENS: Token[] = [
   ...BSC_TOKENS,
   ...ARBITRUM_TOKENS,
   ...ARB_SEPOLIA_TOKENS,
+  ...BSC_TESTNET_TOKENS,
 ];

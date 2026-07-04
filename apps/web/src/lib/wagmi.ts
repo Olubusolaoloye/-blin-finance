@@ -16,7 +16,7 @@
  */
 import { createConfig } from "@privy-io/wagmi";
 import { createStorage } from "wagmi";
-import { bsc, mainnet, arbitrum, arbitrumSepolia } from "./chains";
+import { bsc, mainnet, arbitrum, arbitrumSepolia, bscTestnet } from "./chains";
 import { getTransport } from "./chains";
 
 // Safe localStorage wrapper — no-ops on the server so Next.js SSR doesn't crash.
@@ -27,13 +27,14 @@ const safeLocalStorage = {
 };
 
 export const wagmiConfig = createConfig({
-  chains: [bsc, mainnet, arbitrum, arbitrumSepolia],
+  chains: [bsc, mainnet, arbitrum, arbitrumSepolia, bscTestnet],
   storage: createStorage({ storage: safeLocalStorage }),
   transports: {
     [bsc.id]:             getTransport(bsc.id),
     [mainnet.id]:         getTransport(mainnet.id),
     [arbitrum.id]:        getTransport(arbitrum.id),
     [arbitrumSepolia.id]: getTransport(arbitrumSepolia.id),
+    [bscTestnet.id]:      getTransport(bscTestnet.id),  // public RPC from wagmi/chains
   },
   // ssr: false (default) — avoids the Object.defineProperty crash from
   // mismatched server/client config UIDs with cookieStorage.

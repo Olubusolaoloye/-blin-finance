@@ -1,122 +1,111 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Ownable}      from "@openzeppelin/contracts/access/Ownable.sol";
 import {AutoSaveVault} from "./AutoSaveVault.sol";
-import {AaveV3Strategy} from "./AaveV3Strategy.sol";
 
-/// @title VaultFactory
-/// @notice Deploys one AutoSaveVault per user using CREATE2 with msg.sender
-///         as the salt, yielding deterministic, predictable vault addresses.
+// ─── Custom errors ────────────────────────────────────────────────────────────
+
+error ZeroAddress();
+
+/// @title VaultFactory  (BSC)
+/// @notice Deploys one AutoSaveVault per user via CREATE2 (salt = user address).
 ///
-///         SaveSwap calls getOrCreateVault(msg.sender) to route AutoSave funds
-///         when the user has not specified an explicit vault.
+///         Role wiring on each new vault:
+///           1. SaveSwap receives OPERATOR_ROLE  → can call createLockFor().
+///           2. The user receives DEFAULT_ADMIN_ROLE → controls their vault.
+///           3. Factory renounces DEFAULT_ADMIN_ROLE after wiring.
 contract VaultFactory is Ownable {
     // ─── State ────────────────────────────────────────────────────────────────
 
-    /// Underlying asset for all vaults (e.g. USDC on BSC).
-    IERC20 public immutable asset;
+    /// @notice USDC token passed to every deployed AutoSaveVault.
+    address public immutable usdc;
 
-    /// Aave V3 pool address used by each vault's initial strategy.
-    address public immutable aavePool;
+    /// @notice Treasury receiving early-exit USDC penalties.
+    address public treasury;
 
-    /// Treasury / penalty receiver for all deployed vaults.
-    address public penaltyReceiver;
+    /// @notice SaveSwap contract granted OPERATOR_ROLE on every new vault.
+    address public saveSwap;
 
-    /// user => deployed vault (address(0) if not yet deployed)
     mapping(address => address) private _vaults;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
     event VaultCreated(address indexed user, address indexed vault);
-    event PenaltyReceiverUpdated(address indexed oldReceiver, address indexed newReceiver);
+    event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
+    event SaveSwapUpdated(address indexed oldSaveSwap, address indexed newSaveSwap);
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    constructor(address asset_, address aavePool_, address penaltyReceiver_, address owner_)
-        Ownable(owner_)
-    {
-        asset = IERC20(asset_);
-        aavePool = aavePool_;
-        penaltyReceiver = penaltyReceiver_;
+    constructor(
+        address usdc_,
+        address treasury_,
+        address saveSwap_,   // may be address(0) pre-deployment
+        address owner_
+    ) Ownable(owner_) {
+        if (usdc_ == address(0) || treasury_ == address(0) || owner_ == address(0))
+            revert ZeroAddress();
+
+        usdc     = usdc_;
+        treasury = treasury_;
+        saveSwap = saveSwap_;
     }
 
     // ─── Public ───────────────────────────────────────────────────────────────
 
-    /// @notice Returns the deterministic address a vault would be deployed to
-    ///         for `user`, whether or not it has been deployed yet.
     function getVault(address user) external view returns (address) {
-        address stored = _vaults[user];
-        if (stored != address(0)) return stored;
-        return _predictAddress(user);
+        return _vaults[user];
     }
 
-    /// @notice Returns the user's vault, deploying it first if it does not exist.
-    ///         Safe to call from SaveSwap — adds ~80k gas on first interaction.
+    /// @notice Returns the user's vault, deploying on first call.
     function getOrCreateVault(address user) external returns (address) {
         address existing = _vaults[user];
         if (existing != address(0)) return existing;
         return _deployVault(user);
     }
 
-    /// @notice Convenience: returns true if a vault has been deployed for `user`.
     function hasVault(address user) external view returns (bool) {
         return _vaults[user] != address(0);
     }
 
     // ─── Admin ────────────────────────────────────────────────────────────────
 
-    function setPenaltyReceiver(address newReceiver) external onlyOwner {
-        emit PenaltyReceiverUpdated(penaltyReceiver, newReceiver);
-        penaltyReceiver = newReceiver;
+    function setTreasury(address newTreasury) external onlyOwner {
+        if (newTreasury == address(0)) revert ZeroAddress();
+        emit TreasuryUpdated(treasury, newTreasury);
+        treasury = newTreasury;
+    }
+
+    function setSaveSwap(address newSaveSwap) external onlyOwner {
+        emit SaveSwapUpdated(saveSwap, newSaveSwap);
+        saveSwap = newSaveSwap;
     }
 
     // ─── Internal ─────────────────────────────────────────────────────────────
 
     function _deployVault(address user) internal returns (address vault) {
-        // Deploy the strategy first; vault is its owner
-        AaveV3Strategy strategy = new AaveV3Strategy{salt: bytes32(uint256(uint160(user)))}(
-            aavePool,
-            address(this) // temporarily owned by factory; transferred below
-        );
-
-        // Deploy the vault
         AutoSaveVault v = new AutoSaveVault{salt: bytes32(uint256(uint160(user)))}(
-            asset,
-            "Blin AutoSave Vault",
-            "bASV",
-            user,             // admin = the user
-            penaltyReceiver,
-            address(strategy)
+            usdc,
+            treasury,
+            address(this)   // factory is temporary admin
         );
 
-        // Transfer strategy ownership to the vault
-        strategy.transferOwnership(address(v));
+        // 1. Grant OPERATOR_ROLE to SaveSwap
+        if (saveSwap != address(0)) {
+            v.grantRole(v.OPERATOR_ROLE(), saveSwap);
+        }
+
+        // 2. Grant DEFAULT_ADMIN_ROLE to the user
+        v.grantRole(v.DEFAULT_ADMIN_ROLE(), user);
+
+        // 3. Revoke factory's OPERATOR_ROLE (auto-granted by vault constructor)
+        v.revokeRole(v.OPERATOR_ROLE(), address(this));
+
+        // 4. Factory steps down as admin
+        v.renounceRole(v.DEFAULT_ADMIN_ROLE(), address(this));
 
         vault = address(v);
         _vaults[user] = vault;
         emit VaultCreated(user, vault);
-    }
-
-    /// @dev Predicts CREATE2 address without deploying.
-    ///      Must mirror the exact bytecode + constructor args used in _deployVault.
-    function _predictAddress(address user) internal view returns (address) {
-        bytes32 salt = bytes32(uint256(uint160(user)));
-        bytes memory creationCode = abi.encodePacked(
-            type(AutoSaveVault).creationCode,
-            abi.encode(
-                address(asset),
-                "Blin AutoSave Vault",
-                "bASV",
-                user,
-                penaltyReceiver,
-                address(0) // placeholder — actual strategy address differs; real prediction requires two-step
-            )
-        );
-        bytes32 hash = keccak256(
-            abi.encodePacked(bytes1(0xff), address(this), salt, keccak256(creationCode))
-        );
-        return address(uint160(uint256(hash)));
     }
 }

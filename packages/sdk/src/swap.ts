@@ -333,7 +333,26 @@ export function getQuote(
   );
 }
 
+// ─── NATIVE sentinel (mirrors SaveSwap.NATIVE) ───────────────────────────────
+
+/** EIP-7528 sentinel for native BNB input/output. */
+export const NATIVE_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" as Address;
+
 // ─── Public: executeSwapWithSave ─────────────────────────────────────────────
+//
+// Executes a PancakeSwap V2 swap via SaveSwap.swapAndSave():
+//   1. Pulls tokenIn from caller (ERC-20) or forwards msg.value (BNB).
+//   2. Swaps tokenIn → tokenOut via pathMain on PancakeSwap V2.
+//   3. Saves saveBps% of tokenOut as a time-locked USDC position in the
+//      caller's AutoSaveVault (converting via pathSave if tokenOut ≠ USDC).
+//   4. Returns the remainder to the caller.
+//
+// pathMain defaults to [tokenIn, tokenOut] (direct pair) if omitted.
+// pathSave defaults to [] (skip conversion) if tokenOut is USDC, or
+//   [tokenOut, USDC] (single-hop) if tokenOut ≠ USDC and no path supplied.
+//
+// For BNB input set tokenIn = NATIVE_ADDRESS and pass msg.value via the
+// value field — amountIn is ignored.
 
 export function executeSwapWithSave(
   client: BlinClient,
@@ -352,120 +371,97 @@ export function executeSwapWithSave(
 
   const addrs = (client.chainId in TESTNET_CONTRACT_ADDRESSES
     ? TESTNET_CONTRACT_ADDRESSES[client.chainId as keyof typeof TESTNET_CONTRACT_ADDRESSES]
-    : CONTRACT_ADDRESSES[client.chainId as keyof typeof CONTRACT_ADDRESSES]) ?? CONTRACT_ADDRESSES[1];
-  const saveSwapAddress = addrs.saveSwap;
+    : CONTRACT_ADDRESSES[client.chainId as keyof typeof CONTRACT_ADDRESSES]) ?? CONTRACT_ADDRESSES[56];
+  const saveSwapAddress = addrs.saveSwap as Address;
   if (saveSwapAddress === "0x0000000000000000000000000000000000000000") {
     return errAsync(BlinErrors.rpc(`SaveSwap not deployed on chain ${client.chainId}`));
   }
 
   const caller = account.address as Address;
+  const isNativeIn = req.tokenIn.toLowerCase() === NATIVE_ADDRESS.toLowerCase();
+
+  // Resolve the USDC address for this chain
+  const usdcAddress = (addrs as { usdc?: Address }).usdc ?? ("0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d" as Address);
+
+  // Build default paths when caller omits them
+  const pathMain = req.pathMain ?? [req.tokenIn, req.tokenOut];
+  const isUsdcOut = req.tokenOut.toLowerCase() === usdcAddress.toLowerCase();
+  const pathSave  = req.pathSave ?? (isUsdcOut ? [] : [req.tokenOut, usdcAddress]);
+  const lockDuration = req.lockDuration ?? 2_592_000n; // default 30 days
 
   return ResultAsync.fromPromise(
     (async (): Promise<SwapWithSaveResult> => {
-      // 1. Resolve calldata from the quote's provider
-      const slippageBps = req.quote.amountOut > 0n
-        ? Number((req.quote.amountOut - req.quote.amountOutMin) * 10_000n / req.quote.amountOut)
-        : 50;
-
-      const quoteReq: QuoteRequest = {
-        chainId:  client.chainId,
-        tokenIn:  req.tokenIn,
-        tokenOut: req.tokenOut,
-        amountIn: req.amountIn,
-        slippageBps,
-      };
-
-      let aggData: { aggregator: Address; calldata: `0x${string}` } | null = null;
-
-      if (req.quote.provider === "paraswap") {
-        aggData = await buildParaSwapCalldata(quoteReq, quoteReq.slippageBps);
-      } else if (req.quote.provider === "1inch") {
-        aggData = await build1inchCalldata(quoteReq, caller, quoteReq.slippageBps);
-      }
-
-      // PancakeSwap calldata-building is deferred to Phase 4 (requires SDK)
-      if (!aggData) {
-        throw new Error("calldata_unavailable");
-      }
-
-      // 2. Ensure SaveSwap has approval for tokenIn
-      const tokenInDecimals = await client.publicClient.readContract({
-        address: req.tokenIn,
-        abi: ERC20_ABI,
-        functionName: "decimals",
-      }) as number;
-      void tokenInDecimals;
-
-      const existing = await client.publicClient.readContract({
-        address: req.tokenIn,
-        abi: ERC20_ABI,
-        functionName: "allowance",
-        args: [caller, saveSwapAddress],
-      }) as bigint;
-
-      if (existing < req.amountIn) {
-        const { request: approveReq } = await client.publicClient.simulateContract({
+      // ── 1. Approve SaveSwap to spend tokenIn (ERC-20 only) ──────────────────
+      if (!isNativeIn) {
+        const allowance = await client.publicClient.readContract({
           address: req.tokenIn,
           abi: ERC20_ABI,
-          functionName: "approve",
-          args: [saveSwapAddress, req.amountIn],
-          account: caller,
-        });
-        await walletClient.writeContract(approveReq);
+          functionName: "allowance",
+          args: [caller, saveSwapAddress],
+        }) as bigint;
+
+        if (allowance < req.amountIn) {
+          const { request: approveReq } = await client.publicClient.simulateContract({
+            address: req.tokenIn,
+            abi: ERC20_ABI,
+            functionName: "approve",
+            args: [saveSwapAddress, req.amountIn],
+            account: caller,
+          });
+          const approveHash = await walletClient.writeContract(approveReq);
+          await client.publicClient.waitForTransactionReceipt({ hash: approveHash });
+        }
       }
 
-      // 3. Resolve vault address for the user
-      let vaultAddress = req.vaultAddress;
-      if (!vaultAddress) {
-        const override = await client.publicClient.readContract({
-          address: saveSwapAddress,
-          abi: SAVE_SWAP_ABI,
-          functionName: "userVaultOverride",
-          args: [caller],
-        }) as Address;
-        vaultAddress = override !== "0x0000000000000000000000000000000000000000"
-          ? override
-          : caller; // SaveSwap will resolve via factory if needed
-      }
+      // ── 2. Build SwapParams ──────────────────────────────────────────────────
+      const swapParams = {
+        tokenIn:      req.tokenIn,
+        tokenOut:     req.tokenOut,
+        amountIn:     req.amountIn,
+        minAmountOut: req.quote.amountOutMin,
+        saveBps:      BigInt(req.saveBps),
+        minSaveUsdc:  req.minSaveUsdc ?? 0n,
+        lockDuration,
+        pathMain,
+        pathSave,
+        deadline:     req.deadline,
+      } as const;
 
-      // 4. Execute swapAndSave
-      const { request: swapReq, result: savedAmountResult } =
-        await client.publicClient.simulateContract({
-          address: saveSwapAddress,
-          abi: SAVE_SWAP_ABI,
-          functionName: "swapAndSave",
-          args: [
-            {
-              tokenIn:        req.tokenIn,
-              tokenOut:       req.tokenOut,
-              amountIn:       req.amountIn,
-              minAmountOut:   req.quote.amountOutMin,
-              saveBps:        BigInt(req.saveBps),
-              aggregator:     aggData.aggregator,
-              aggregatorData: aggData.calldata,
-              deadline:       req.deadline,
-            },
-          ],
-          account: caller,
-        });
+      // ── 3. Simulate & write swapAndSave ──────────────────────────────────────
+      const simulateArgs = {
+        address: saveSwapAddress,
+        abi:     SAVE_SWAP_ABI,
+        functionName: "swapAndSave" as const,
+        args:    [swapParams] as const,
+        account: caller,
+        ...(isNativeIn ? { value: req.amountIn } : {}),
+      };
+
+      const { request: swapReq, result: lockIdResult } =
+        await client.publicClient.simulateContract(simulateArgs);
 
       const txHash = await walletClient.writeContract(swapReq);
-      const savedAmount  = savedAmountResult as bigint;
-      const amountOut    = req.quote.amountOut;
-      const receivedAmount = amountOut - savedAmount;
+      const lockId = lockIdResult as bigint;
 
-      return {
-        txHash,
-        savedAmount,
-        receivedAmount,
-        vaultAddress: vaultAddress as Address,
-      };
-    })(),
-    (err) => {
-      if (err instanceof Error && err.message === "calldata_unavailable") {
-        return BlinErrors.rpc("Aggregator calldata unavailable for selected provider");
+      // ── 4. Resolve vault address (factory creates it on first swap) ──────────
+      const receipt = await client.publicClient.waitForTransactionReceipt({ hash: txHash });
+      void receipt;
+
+      const factoryAddress = (addrs as { vaultFactory?: Address }).vaultFactory
+        ?? ("0x0000000000000000000000000000000000000000" as Address);
+
+      let vaultAddress: Address = "0x0000000000000000000000000000000000000000";
+      if (factoryAddress !== "0x0000000000000000000000000000000000000000") {
+        vaultAddress = await client.publicClient.readContract({
+          address:      factoryAddress,
+          abi:          [{ type: "function", name: "getVault", stateMutability: "view", inputs: [{ name: "user", type: "address" }], outputs: [{ name: "", type: "address" }] }],
+          functionName: "getVault",
+          args:         [caller],
+        }) as Address;
       }
-      return BlinErrors.rpc("Swap execution failed", undefined, err);
-    },
+
+      return { txHash, lockId, vaultAddress };
+    })(),
+    (err) => BlinErrors.rpc("Swap execution failed", undefined, err),
   );
 }

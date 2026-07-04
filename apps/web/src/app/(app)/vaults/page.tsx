@@ -54,14 +54,14 @@ function estimatedYield(amount: bigint, decimals: number, durationSecs: bigint):
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-// Arbitrum Sepolia testnet chain ID
-const TESTNET_CHAIN_ID = 421614;
+// Testnets that show the faucet button
+const TESTNET_CHAIN_IDS = new Set([421614, 97]);
 
 export default function VaultsPage() {
   const vaultData  = useVaultData();
   const autoSave   = useAutoSaveConfig();
   const { chainId } = useAccount();
-  const isTestnet   = chainId === TESTNET_CHAIN_ID;
+  const isTestnet   = chainId !== undefined && TESTNET_CHAIN_IDS.has(chainId);
 
   const {
     vaultEnabled,
@@ -355,8 +355,8 @@ export default function VaultsPage() {
         <div className="flex flex-col gap-4">
           {allDisplayLocks.map((lock, i) => {
             const status   = lockStatus(lock);
-            const amountFmt = formatAmount(lock.amount, assetDecimals);
-            const yieldFmt  = estimatedYield(lock.amount, assetDecimals, lock.lockedUntil - lock.createdAt).toFixed(2);
+            const amountFmt = formatAmount(lock.principal, assetDecimals);
+            const yieldFmt  = estimatedYield(lock.principal, assetDecimals, lock.lockedUntil - lock.lockedAt).toFixed(2);
 
             return (
               <motion.div
@@ -384,7 +384,7 @@ export default function VaultsPage() {
                           <span className="text-[14px] text-text-muted">{assetSymbol}</span>
                         </div>
                         <div className="inline-flex items-center px-2 py-0.5 bg-brand-green/10 text-brand-green text-[11px] font-bold rounded-full">
-                          +${yieldFmt} est. yield
+                          +{parseFloat(formatUnits(lock.blinReward, 18)).toFixed(2)} $BLIN est.
                         </div>
                       </div>
                     </div>
@@ -472,7 +472,7 @@ export default function VaultsPage() {
               <div className="text-[12px] text-text-secondary uppercase font-bold tracking-widest">Total to receive</div>
               <div className="flex items-baseline gap-2">
                 <span className="font-display font-bold text-[36px] text-text-primary">
-                  {selectedLock ? formatAmount(selectedLock.amount, assetDecimals) : "0.00"}
+                  {selectedLock ? formatAmount(selectedLock.principal, assetDecimals) : "0.00"}
                 </span>
                 <span className="text-[16px] font-bold text-text-muted">{assetSymbol}</span>
               </div>
@@ -481,15 +481,15 @@ export default function VaultsPage() {
               <div className="flex justify-between">
                 <span className="text-text-secondary">Principal</span>
                 <span className="font-semibold">
-                  {selectedLock ? formatAmount(selectedLock.amount, assetDecimals) : "—"} {assetSymbol}
+                  {selectedLock ? formatAmount(selectedLock.principal, assetDecimals) : "—"} {assetSymbol}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-text-secondary">Est. Yield</span>
+                <span className="text-text-secondary">$BLIN Yield</span>
                 <span className="font-semibold text-brand-green">
                   +{selectedLock
-                    ? estimatedYield(selectedLock.amount, assetDecimals, selectedLock.lockedUntil - selectedLock.createdAt).toFixed(2)
-                    : "0.00"} {assetSymbol}
+                    ? parseFloat(formatUnits(selectedLock.blinReward, 18)).toFixed(2)
+                    : "0.00"} $BLIN
                 </span>
               </div>
             </div>
@@ -589,14 +589,14 @@ export default function VaultsPage() {
             <div className="flex justify-between text-[14px]">
               <span className="text-text-secondary">Principal</span>
               <span className="font-semibold">
-                {selectedLock ? formatAmount(selectedLock.amount, assetDecimals) : "—"} {assetSymbol}
+                {selectedLock ? formatAmount(selectedLock.principal, assetDecimals) : "—"} {assetSymbol}
               </span>
             </div>
             <div className="flex justify-between text-[14px]">
               <span className="text-text-secondary">Penalty (15%)</span>
               <span className="font-bold text-brand-red">
                 -{selectedLock
-                  ? (parseFloat(formatUnits(selectedLock.amount, assetDecimals)) * 0.15).toFixed(2)
+                  ? (parseFloat(formatUnits(selectedLock.principal, assetDecimals)) * 0.15).toFixed(2)
                   : "0"} {assetSymbol}
               </span>
             </div>
@@ -604,7 +604,7 @@ export default function VaultsPage() {
               <span className="font-bold text-text-primary">You receive</span>
               <span className="font-black text-[20px] text-brand-blue">
                 {selectedLock
-                  ? (parseFloat(formatUnits(selectedLock.amount, assetDecimals)) * 0.85).toFixed(2)
+                  ? (parseFloat(formatUnits(selectedLock.principal, assetDecimals)) * 0.85).toFixed(2)
                   : "0"} {assetSymbol}
               </span>
             </div>

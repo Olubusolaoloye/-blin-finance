@@ -41,36 +41,56 @@ export interface RouteStep {
 }
 
 export interface SwapWithSaveRequest {
-  quote: QuoteResult;
-  saveBps: number;
-  vaultAddress?: Address;
-  deadline: bigint;
-  tokenIn: Address;
-  tokenOut: Address;
-  amountIn: bigint;
+  quote:        QuoteResult;
+  saveBps:      number;
+  deadline:     bigint;
+  tokenIn:      Address;
+  tokenOut:     Address;
+  amountIn:     bigint;
+  /**
+   * Lock duration in seconds [7 days, 3 years].
+   * Defaults to 30 days (2_592_000) if omitted.
+   */
+  lockDuration?: bigint;
+  /**
+   * PancakeSwap V2 path for the main swap.
+   * For BNB input path[0] must be WBNB; for BNB output path[last] must be WBNB.
+   * If omitted a direct [tokenIn, tokenOut] path is used.
+   */
+  pathMain?: Address[];
+  /**
+   * PancakeSwap V2 path for the save-portion → USDC conversion.
+   * Leave empty (or omit) when tokenOut is already USDC.
+   */
+  pathSave?: Address[];
+  /** Minimum USDC from the save→USDC leg. Defaults to 0 (no slippage check). */
+  minSaveUsdc?: bigint;
 }
 
 export interface SwapWithSaveResult {
-  txHash: Hash;
-  savedAmount: bigint;
-  receivedAmount: bigint;
+  txHash:      Hash;
+  lockId:      bigint;
   vaultAddress: Address;
 }
 
 // ─── Vault ────────────────────────────────────────────────────────────────────
 
 export interface VaultLock {
-  id: bigint;
-  amount: bigint;
+  id:          bigint;
+  owner:       Address;
+  /** USDC wei locked. */
+  principal:   bigint;
+  lockedAt:    bigint;
   lockedUntil: bigint;
-  createdAt: bigint;
-  name: string;
-  broken: boolean;
+  /** $BLIN wei earned on matured withdrawal (display only — claimed on Ethereum). */
+  blinReward:  bigint;
+  name:        string;
+  settled:     boolean;
   // Derived fields
   daysRemaining: number;
-  maturityDate: Date;
-  currentYield: bigint;
-  currentValue: bigint;
+  maturityDate:  Date;
+  /** Alias for principal — the lock's current USDC value. */
+  currentValue:  bigint;
 }
 
 export interface CreateLockRequest {

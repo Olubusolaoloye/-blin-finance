@@ -31,32 +31,38 @@ import type {
 const addressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/) as z.ZodType<Address>;
 
 // ─── Raw contract Lock struct shape ──────────────────────────────────────────
-
+//
+// Matches AutoSaveVault.Lock:
+//   { id, owner, principal, lockedAt, lockedUntil, blinReward, name, settled }
+//
 interface RawLock {
-  amount: bigint;
+  id:          bigint;
+  owner:       `0x${string}`;
+  principal:   bigint;
+  lockedAt:    bigint;
   lockedUntil: bigint;
-  createdAt: bigint;
-  name: `0x${string}`;
-  broken: boolean;
+  blinReward:  bigint;
+  name:        `0x${string}`;
+  settled:     boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function toVaultLock(raw: RawLock, id: bigint): VaultLock {
+function toVaultLock(raw: RawLock): VaultLock {
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
   const secsRemaining = raw.lockedUntil > nowSec ? raw.lockedUntil - nowSec : 0n;
   return {
-    id,
-    amount:         raw.amount,
-    lockedUntil:    raw.lockedUntil,
-    createdAt:      raw.createdAt,
-    name:           safeDecodeBytes32(raw.name),
-    broken:         raw.broken,
-    daysRemaining:  Number(secsRemaining / 86400n),
-    maturityDate:   new Date(Number(raw.lockedUntil) * 1000),
-    // Yield not tracked per-lock on-chain; currentValue = principal until Phase 4
-    currentYield:   0n,
-    currentValue:   raw.amount,
+    id:            raw.id,
+    owner:         raw.owner as Address,
+    principal:     raw.principal,
+    lockedAt:      raw.lockedAt,
+    lockedUntil:   raw.lockedUntil,
+    blinReward:    raw.blinReward,
+    name:          safeDecodeBytes32(raw.name),
+    settled:       raw.settled,
+    daysRemaining: Number(secsRemaining / 86400n),
+    maturityDate:  new Date(Number(raw.lockedUntil) * 1000),
+    currentValue:  raw.principal,
   };
 }
 
@@ -157,11 +163,11 @@ export function listLocks(
       .readContract({
         address: parsedVault.data,
         abi: AUTO_SAVE_VAULT_ABI,
-        functionName: "getLocks",
+        functionName: "getUserLocks",
         args: [parsedOwner.data],
       })
       .then((locks) =>
-        (locks as RawLock[]).map((raw, i) => toVaultLock(raw, BigInt(i))),
+        (locks as RawLock[]).map((raw) => toVaultLock(raw)),
       ),
     toBlinError,
   );
@@ -243,11 +249,11 @@ export function createLock(
       }
       const caller = client.walletClient.account.address as Address;
 
-      // Read the vault's underlying asset address (e.g. mUSDC on testnet)
+      // Read the vault's USDC token address
       const assetAddress = await client.publicClient.readContract({
         address: req.vaultAddress,
         abi: AUTO_SAVE_VAULT_ABI,
-        functionName: "asset",
+        functionName: "usdc",
       }) as Address;
 
       // ── Pre-flight balance check ──────────────────────────────────────────
@@ -324,7 +330,7 @@ export function topUp(
       const assetAddress = await client.publicClient.readContract({
         address: req.vaultAddress,
         abi: AUTO_SAVE_VAULT_ABI,
-        functionName: "asset",
+        functionName: "usdc",
       }) as Address;
 
       // Pre-flight balance check — same pattern as createLock
@@ -461,11 +467,11 @@ export function claimTestTokens(
       }
       const caller = client.walletClient.account.address as Address;
 
-      // Resolve the underlying asset (MockERC20) from the vault
+      // Resolve the USDC token address from the vault (testnet: MockERC20)
       const assetAddress = await client.publicClient.readContract({
         address: vaultAddress,
         abi:     AUTO_SAVE_VAULT_ABI,
-        functionName: "asset",
+        functionName: "usdc",
       }) as Address;
 
       const { request } = await client.publicClient.simulateContract({
@@ -497,13 +503,10 @@ export function breakLock(
         address: req.vaultAddress,
         abi: AUTO_SAVE_VAULT_ABI,
         functionName: "getLock",
-        args: [
-          client.walletClient?.account?.address as Address ?? req.vaultAddress,
-          req.lockId,
-        ],
+        args: [req.lockId],
       }) as RawLock;
 
-      const penalty = (lock.amount * 1500n) / 10_000n;
+      const penalty = (lock.principal * 1500n) / 10_000n;
 
       await client.publicClient.simulateContract({
         address: req.vaultAddress,
@@ -532,4 +535,57 @@ export function breakLock(
       return client.walletClient.writeContract(request);
     },
   };
+}
+
+// ─── Public: getClaimableBlin ─────────────────────────────────────────────────
+//
+// Returns the total $BLIN wei accumulated by a user from all matured USDC
+// withdrawals. This is the authoritative record on BSC that the backend reads
+// to issue claim vouchers on Ethereum via BlinYieldDistributor.
+
+export function getClaimableBlin(
+  client: BlinClient,
+  vaultAddress: Address,
+  user: Address,
+): ResultAsync<bigint, BlinError> {
+  const parsedVault = addressSchema.safeParse(vaultAddress);
+  const parsedUser  = addressSchema.safeParse(user);
+
+  if (!parsedVault.success) return errAsync(BlinErrors.validation("vaultAddress", vaultAddress));
+  if (!parsedUser.success)  return errAsync(BlinErrors.validation("user", user));
+
+  return ResultAsync.fromPromise(
+    client.publicClient.readContract({
+      address:      parsedVault.data,
+      abi:          AUTO_SAVE_VAULT_ABI,
+      functionName: "claimableBlin",
+      args:         [parsedUser.data],
+    }).then((v) => v as bigint),
+    toBlinError,
+  );
+}
+
+// ─── Public: previewReward ────────────────────────────────────────────────────
+//
+// Returns the $BLIN wei yield that will be earned for a given USDC amount and
+// lock duration. Matches AutoSaveVault.previewReward(amount, duration).
+
+export function previewReward(
+  client: BlinClient,
+  vaultAddress: Address,
+  amount: bigint,
+  durationSeconds: bigint,
+): ResultAsync<bigint, BlinError> {
+  const parsedVault = addressSchema.safeParse(vaultAddress);
+  if (!parsedVault.success) return errAsync(BlinErrors.validation("vaultAddress", vaultAddress));
+
+  return ResultAsync.fromPromise(
+    client.publicClient.readContract({
+      address:      parsedVault.data,
+      abi:          AUTO_SAVE_VAULT_ABI,
+      functionName: "previewReward",
+      args:         [amount, durationSeconds],
+    }).then((v) => v as bigint),
+    toBlinError,
+  );
 }

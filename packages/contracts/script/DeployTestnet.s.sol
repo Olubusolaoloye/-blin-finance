@@ -2,35 +2,39 @@
 pragma solidity 0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {VaultFactory}  from "../src/VaultFactory.sol";
-import {SaveSwap}      from "../src/SaveSwap.sol";
-import {MockERC20}     from "../src/test/MockERC20.sol";
-import {MockAavePool}  from "../src/test/MockAavePool.sol";
+import {VaultFactory}     from "../src/VaultFactory.sol";
+import {SaveSwap}         from "../src/SaveSwap.sol";
+import {MockERC20}        from "../src/test/MockERC20.sol";
 
-/// @notice Testnet deployment — no Aave, no multisig.
-///         Deploys a mintable mock USDC, a no-op Aave pool shim,
-///         then VaultFactory + SaveSwap exactly as the mainnet script does.
+/// @notice BSC Testnet (chainId 97) deployment — no real assets, no multisig.
 ///
-/// Prerequisites:
-///   1. Install Foundry:  curl -L https://foundry.paradigm.xyz | bash && foundryup
-///   2. Copy .env.testnet.example to .env.testnet and fill in values
-///   3. Run:
-///        source .env.testnet
-///        forge script script/DeployTestnet.s.sol \
-///          --rpc-url $RPC_URL \
-///          --broadcast \
-///          --verify \
-///          --etherscan-api-key $ETHERSCAN_KEY
+///         Deploys a mintable mock USDC (6 dec), VaultFactory, and SaveSwap.
+///         Uses the real BSC Testnet PancakeSwap V2 Router and WBNB so that
+///         real testnet swaps work end-to-end.
 ///
-/// After deployment, copy the printed addresses into:
-///   packages/shared/src/addresses.ts  (for the matching chainId)
+///         Required env vars:
+///           DEPLOYER_PRIVATE_KEY   — deployer private key (hex, no 0x prefix)
+///           DEPLOYER_ADDRESS       — corresponding address
 ///
-/// .env.testnet keys:
-///   DEPLOYER_PRIVATE_KEY  — deployer wallet private key
-///   DEPLOYER_ADDRESS      — deployer wallet address
-///   RPC_URL               — testnet RPC (e.g. Arbitrum Sepolia, BSC Testnet)
-///   ETHERSCAN_KEY         — block explorer API key for --verify
+///         Run:
+///           forge script script/DeployTestnet.s.sol \
+///             --rpc-url bsc_testnet \
+///             --broadcast \
+///             --verify \
+///             --etherscan-api-key $BSCSCAN_API_KEY
+///
+///         After deployment, paste the printed addresses into:
+///           packages/shared/src/addresses.ts  (chainId 97)
+///
+///         Faucet: users can call mockUsdc.faucet() to self-mint 10,000 mUSDC.
 contract DeployTestnetScript is Script {
+
+    // ── BSC Testnet constants ─────────────────────────────────────────────────
+    /// @dev PancakeSwap V2 Router02 on BSC Testnet.
+    address constant ROUTER_TESTNET = 0xD99D1c33F9fC3444f8101754aBC46c52416550D1;
+    /// @dev WBNB on BSC Testnet.
+    address constant WBNB_TESTNET   = 0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd;
+
     function run() external {
         address deployer = vm.envAddress("DEPLOYER_ADDRESS");
 
@@ -42,34 +46,43 @@ contract DeployTestnetScript is Script {
         // Seed the deployer with 1,000,000 mUSDC for testing
         mockUsdc.mint(deployer, 1_000_000 * 1e6);
 
-        // ── 2. Mock Aave pool — holds tokens, no yield ────────────────────────
-        MockAavePool mockAave = new MockAavePool();
-
-        // ── 3. VaultFactory — identical constructor to mainnet ────────────────
+        // ── 2. VaultFactory (saveSwap_ = address(0) initially) ───────────────
         //       treasury = deployer on testnet (penalty fees go to deployer)
         VaultFactory factory = new VaultFactory(
             address(mockUsdc),
-            address(mockAave),
-            deployer,   // penaltyReceiver
-            deployer    // owner
+            deployer,      // treasury
+            address(0),    // saveSwap wired below
+            deployer       // owner (multisig on mainnet)
         );
 
-        // ── 4. SaveSwap ───────────────────────────────────────────────────────
-        SaveSwap swap = new SaveSwap(address(factory), deployer);
+        // ── 3. SaveSwap ───────────────────────────────────────────────────────
+        SaveSwap swap = new SaveSwap(
+            ROUTER_TESTNET,
+            address(mockUsdc),
+            WBNB_TESTNET,
+            address(factory),
+            deployer       // owner
+        );
+
+        // ── 4. Wire SaveSwap into VaultFactory ────────────────────────────────
+        factory.setSaveSwap(address(swap));
 
         vm.stopBroadcast();
 
         // ── Print addresses ───────────────────────────────────────────────────
-        console2.log("=== Blin Testnet Deployment ===");
-        console2.log("MockUSDC:    ", address(mockUsdc));
-        console2.log("MockAavePool:", address(mockAave));
-        console2.log("VaultFactory:", address(factory));
-        console2.log("SaveSwap:    ", address(swap));
+        console2.log("=== Blin Testnet Deployment (BSC Testnet 97) ===");
+        console2.log("MockUSDC (mUSDC):", address(mockUsdc));
+        console2.log("VaultFactory:    ", address(factory));
+        console2.log("SaveSwap:        ", address(swap));
         console2.log("");
-        console2.log("Paste into packages/shared/src/addresses.ts:");
-        console2.log("  vaultFactory: \"", address(factory), "\"");
-        console2.log("  saveSwap:     \"", address(swap),    "\"");
+        console2.log("Paste into packages/shared/src/addresses.ts  (chainId 97):");
+        console2.log("  vaultFactory:  \"", address(factory), "\"");
+        console2.log("  saveSwap:      \"", address(swap),    "\"");
+        console2.log("  usdc:          \"", address(mockUsdc),"\"");
+        console2.log("  wbnb:          \"", WBNB_TESTNET,     "\"");
+        console2.log("  pancakeRouter: \"", ROUTER_TESTNET,   "\"");
+        console2.log("  treasury:      \"", deployer,         "\"");
         console2.log("");
-        console2.log("Faucet: users can call mockUsdc.faucet() to self-mint 10,000 mUSDC");
+        console2.log("Faucet: users call mockUsdc.faucet() to self-mint 10,000 mUSDC.");
     }
 }

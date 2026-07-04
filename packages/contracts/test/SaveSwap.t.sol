@@ -1,65 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import {Test} from "forge-std/Test.sol";
-import {ERC20Mock} from "./mocks/ERC20Mock.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {AutoSaveVault} from "../src/AutoSaveVault.sol";
-import {VaultFactory} from "../src/VaultFactory.sol";
-import {SaveSwap} from "../src/SaveSwap.sol";
-import {IYieldStrategy} from "../src/interfaces/IYieldStrategy.sol";
+import {Test}              from "forge-std/Test.sol";
+import {ERC20Mock}         from "./mocks/ERC20Mock.sol";
+import {MockPancakeRouter} from "./mocks/MockPancakeRouter.sol";
+import {VaultFactory}      from "../src/VaultFactory.sol";
+import {SaveSwap}          from "../src/SaveSwap.sol";
+import {AutoSaveVault}     from "../src/AutoSaveVault.sol";
 import {
     ZeroAmount,
     InvalidSaveBps,
-    SwapFailed,
     DeadlinePassed,
-    UnsupportedAggregator
+    InvalidPath,
+    ZeroAddress
 } from "../src/SaveSwap.sol";
 
-/// @notice Stub yield strategy for vault construction.
-contract SaveSwapNoopStrategy is IYieldStrategy {
-    function deposit(address asset, uint256 amount) external {
-        IERC20(asset).transferFrom(msg.sender, address(this), amount);
-    }
-    function withdraw(address asset, uint256 amount, address recipient) external {
-        IERC20(asset).transfer(recipient, amount);
-    }
-    function totalValue(address asset) external view returns (uint256) {
-        return IERC20(asset).balanceOf(address(this));
-    }
-    function currentApyBps(address) external pure returns (uint256) { return 0; }
-}
-
-/// @notice Mock aggregator: swaps tokenIn 1:1 for tokenOut, forwarding to SaveSwap.
-contract MockAggregator {
-    ERC20Mock public tokenIn;
-    ERC20Mock public tokenOut;
-
-    constructor(ERC20Mock _in, ERC20Mock _out) {
-        tokenIn  = _in;
-        tokenOut = _out;
-    }
-
-    /// Called by SaveSwap via low-level call. Pulls tokenIn from SaveSwap and
-    /// pushes tokenOut back to SaveSwap (1:1 swap, no fees).
-    function swap(address saveSwap, uint256 amountIn) external {
-        tokenIn.transferFrom(saveSwap, address(this), amountIn);
-        tokenOut.transfer(saveSwap, amountIn);
-    }
-}
-
-/// @notice Aggregator that always fails.
-contract FailingAggregator {
-    fallback() external { revert("swap failure"); }
-}
-
 contract SaveSwapTest is Test {
-    SaveSwap        saveSwap;
-    AutoSaveVault   vault;
-    ERC20Mock       tokenIn;
-    ERC20Mock       tokenOut;
-    MockAggregator  aggregator;
-    SaveSwapNoopStrategy strategy;
+
+    MockPancakeRouter router;
+    ERC20Mock         usdcMock;
+    ERC20Mock         tokenA;
+    VaultFactory      factory;
+    SaveSwap          swap;
 
     address owner    = makeAddr("owner");
     address treasury = makeAddr("treasury");
@@ -68,202 +30,294 @@ contract SaveSwapTest is Test {
     uint256 constant ONE = 1e18;
 
     function setUp() public {
-        tokenIn  = new ERC20Mock();
-        tokenOut = new ERC20Mock();
+        router   = new MockPancakeRouter();
+        usdcMock = new ERC20Mock();
+        tokenA   = new ERC20Mock();
 
-        // Deploy a standalone vault backed by tokenOut
-        strategy = new SaveSwapNoopStrategy();
-        vault = new AutoSaveVault(
-            tokenOut,
-            "Blin Save TEST",
-            "bsTEST",
-            owner,
-            treasury,
-            address(strategy)
-        );
+        factory = new VaultFactory(address(usdcMock), treasury, address(0), owner);
 
-        // Deploy a minimal VaultFactory stub — point to a fake aavePool
-        // SaveSwap resolves vault per-user; we override it to our vault.
-        VaultFactory factory = new VaultFactory(
-            address(tokenOut),
-            makeAddr("aavePool"),
-            treasury,
+        swap = new SaveSwap(
+            address(router),
+            address(usdcMock),
+            address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c),
+            address(factory),
             owner
         );
 
-        saveSwap = new SaveSwap(address(factory), owner);
-
-        aggregator = new MockAggregator(tokenIn, tokenOut);
-
-        // Approve aggregator and mint tokenOut for aggregator to pay out
         vm.prank(owner);
-        saveSwap.setAggregator(address(aggregator), true);
+        factory.setSaveSwap(address(swap));
 
-        tokenIn.mint(alice, 1_000 * ONE);
-        tokenOut.mint(address(aggregator), 1_000 * ONE);
+        // Fund router with USDC and tokenA for 1:1 mock swaps
+        usdcMock.mint(address(router), 1_000_000 * ONE);
+        tokenA.mint(address(router),   1_000_000 * ONE);
 
+        tokenA.mint(alice, 1_000 * ONE);
         vm.prank(alice);
-        tokenIn.approve(address(saveSwap), type(uint256).max);
-
-        // Override alice's vault to our pre-deployed one
-        vm.prank(alice);
-        saveSwap.setVaultOverride(address(vault));
+        tokenA.approve(address(swap), type(uint256).max);
     }
 
-    // ─── swapAndSave happy path ───────────────────────────────────────────────
+    // ─── Helpers ──────────────────────────────────────────────────────────────
 
-    function _buildParams(
+    function _usdcPath() internal view returns (address[] memory p) {
+        p = new address[](2);
+        p[0] = address(tokenA);
+        p[1] = address(usdcMock);
+    }
+
+    function _trivialPath() internal view returns (address[] memory p) {
+        p = new address[](2);
+        p[0] = address(tokenA);
+        p[1] = address(tokenA);
+    }
+
+    function _params(
         uint256 amountIn,
         uint256 saveBps,
-        uint256 deadlineOffset
+        address tokenOut_,
+        address[] memory pathMain_,
+        address[] memory pathSave_
     ) internal view returns (SaveSwap.SwapParams memory) {
         return SaveSwap.SwapParams({
-            tokenIn:        address(tokenIn),
-            tokenOut:       address(tokenOut),
-            amountIn:       amountIn,
-            minAmountOut:   amountIn, // 1:1 mock
-            saveBps:        saveBps,
-            aggregator:     address(aggregator),
-            aggregatorData: abi.encodeCall(MockAggregator.swap, (address(saveSwap), amountIn)),
-            deadline:       block.timestamp + deadlineOffset
+            tokenIn:      address(tokenA),
+            tokenOut:     tokenOut_,
+            amountIn:     amountIn,
+            minAmountOut: 0,
+            saveBps:      saveBps,
+            minSaveUsdc:  0,
+            lockDuration: 30 days,
+            pathMain:     pathMain_,
+            pathSave:     pathSave_,
+            deadline:     block.timestamp + 1 hours
         });
     }
 
-    function test_swapAndSave_splitsCorrectly() public {
-        uint256 amountIn = 100 * ONE;
-        uint256 saveBps  = 1000; // 10%
+    // ─── tokenOut = USDC (no save conversion) ────────────────────────────────
 
-        uint256 aliceInBefore  = tokenIn.balanceOf(alice);
-        uint256 aliceOutBefore = tokenOut.balanceOf(alice);
+    function test_usdcOut_splitsCorrectly() public {
+        uint256 amountIn = 100 * ONE;
+        uint256 saveBps  = 1_000; // 10%
+
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(amountIn, saveBps, address(usdcMock), _usdcPath(), noPath);
+
+        uint256 aliceUsdcBefore = usdcMock.balanceOf(alice);
+        uint256 aliceABefore    = tokenA.balanceOf(alice);
 
         vm.prank(alice);
-        uint256 savedAmount = saveSwap.swapAndSave(_buildParams(amountIn, saveBps, 1 hours));
+        swap.swapAndSave(p);
 
-        uint256 expectedSaved = (amountIn * saveBps) / 10_000;
-        uint256 expectedUser  = amountIn - expectedSaved;
-
-        assertEq(savedAmount, expectedSaved, "savedAmount return");
-        assertEq(tokenIn.balanceOf(alice),  aliceInBefore  - amountIn,     "tokenIn spent");
-        assertEq(tokenOut.balanceOf(alice), aliceOutBefore + expectedUser,  "tokenOut received");
+        uint256 expectedUser = (amountIn * (10_000 - saveBps)) / 10_000;
+        assertEq(tokenA.balanceOf(alice),   aliceABefore - amountIn, "tokenA spent");
+        assertEq(usdcMock.balanceOf(alice) - aliceUsdcBefore, expectedUser, "USDC to alice");
     }
 
-    function test_swapAndSave_zeroSaveBps_allToUser() public {
+    function test_usdcOut_lockCreatedForAlice() public {
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(100 * ONE, 2_000, address(usdcMock), _usdcPath(), noPath);
+
+        vm.prank(alice);
+        uint256 lockId = swap.swapAndSave(p);
+
+        assertTrue(factory.hasVault(alice), "vault deployed");
+
+        AutoSaveVault vault = AutoSaveVault(factory.getVault(alice));
+        AutoSaveVault.Lock memory lock = vault.getLock(lockId);
+        assertEq(lock.owner, alice);
+        assertTrue(lock.principal > 0);
+        assertTrue(lock.blinReward > 0, "blin yield tracked");
+    }
+
+    function test_usdcOut_blinYieldTrackedNotTransferred() public {
+        // $BLIN yield is accumulated on BSC (claimableBlin), no token transfer
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(100 * ONE, 1_000, address(usdcMock), _usdcPath(), noPath);
+
+        vm.prank(alice);
+        swap.swapAndSave(p);
+
+        // Vault has no blinToken address — yield is just tracked
+        AutoSaveVault vault = AutoSaveVault(factory.getVault(alice));
+        assertTrue(vault.getLockCount(alice) == 1, "lock created");
+    }
+
+    // ─── tokenOut = ERC-20 (non-USDC, save conversion needed) ───────────────
+
+    function test_nonUsdcOut_saveConvertedToUsdc() public {
+        address[] memory pathSave = _usdcPath();
+        SaveSwap.SwapParams memory p = _params(100 * ONE, 1_000, address(tokenA), _trivialPath(), pathSave);
+
+        vm.prank(alice);
+        uint256 lockId = swap.swapAndSave(p);
+
+        AutoSaveVault vault = AutoSaveVault(factory.getVault(alice));
+        assertTrue(vault.getLock(lockId).principal > 0, "USDC saved");
+    }
+
+    // ─── saveBps = 0 — no vault interaction ──────────────────────────────────
+
+    function test_zeroSaveBps_allToUser() public {
         uint256 amountIn = 50 * ONE;
-        vm.prank(alice);
-        uint256 saved = saveSwap.swapAndSave(_buildParams(amountIn, 0, 1 hours));
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(amountIn, 0, address(usdcMock), _usdcPath(), noPath);
 
-        assertEq(saved, 0, "nothing saved");
-        assertEq(tokenOut.balanceOf(alice), amountIn, "all to user");
+        uint256 aliceBefore = usdcMock.balanceOf(alice);
+        vm.prank(alice);
+        uint256 lockId = swap.swapAndSave(p);
+
+        assertEq(usdcMock.balanceOf(alice) - aliceBefore, amountIn, "all to user");
+        assertEq(lockId, type(uint256).max, "no lock created");
+        assertFalse(factory.hasVault(alice), "no vault deployed");
     }
 
-    function test_swapAndSave_maxSaveBps() public {
-        uint256 amountIn = 100 * ONE;
-        uint256 saveBps  = saveSwap.MAX_SAVE_BPS(); // 50%
+    // ─── BNB output ───────────────────────────────────────────────────────────
+
+    function test_bnbOut_saveConvertedToUsdc() public {
+        address NATIVE = swap.NATIVE();
+        vm.deal(address(router), 1_000 ether);
+
+        address[] memory pathMain = new address[](2);
+        pathMain[0] = address(tokenA);
+        pathMain[1] = NATIVE;
+
+        address[] memory pathSave = new address[](2);
+        pathSave[0] = address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c); // WBNB
+        pathSave[1] = address(usdcMock);
+
+        SaveSwap.SwapParams memory p = SaveSwap.SwapParams({
+            tokenIn:      address(tokenA),
+            tokenOut:     NATIVE,
+            amountIn:     100 * ONE,
+            minAmountOut: 0,
+            saveBps:      1_000,
+            minSaveUsdc:  0,
+            lockDuration: 30 days,
+            pathMain:     pathMain,
+            pathSave:     pathSave,
+            deadline:     block.timestamp + 1 hours
+        });
+
+        uint256 aliceBnbBefore = alice.balance;
         vm.prank(alice);
-        uint256 saved = saveSwap.swapAndSave(_buildParams(amountIn, saveBps, 1 hours));
-        assertEq(saved, amountIn / 2, "50% saved");
+        uint256 lockId = swap.swapAndSave(p);
+
+        assertTrue(alice.balance > aliceBnbBefore, "BNB to alice");
+        AutoSaveVault vault = AutoSaveVault(factory.getVault(alice));
+        assertTrue(vault.getLock(lockId).principal > 0, "USDC saved in vault");
     }
 
-    // ─── swapAndSave reverts ──────────────────────────────────────────────────
+    // ─── BNB input ────────────────────────────────────────────────────────────
 
-    function test_swapAndSave_revertsDeadlinePassed() public {
+    function test_bnbIn_usdcOut_lockCreated() public {
+        address NATIVE = swap.NATIVE();
+        uint256 bnbIn  = 1 ether;
+        vm.deal(alice, bnbIn);
+
+        address[] memory pathMain = new address[](2);
+        pathMain[0] = address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c);
+        pathMain[1] = address(usdcMock);
+
+        address[] memory noPath = new address[](0);
+
+        SaveSwap.SwapParams memory p = SaveSwap.SwapParams({
+            tokenIn:      NATIVE,
+            tokenOut:     address(usdcMock),
+            amountIn:     0,
+            minAmountOut: 0,
+            saveBps:      1_000,
+            minSaveUsdc:  0,
+            lockDuration: 30 days,
+            pathMain:     pathMain,
+            pathSave:     noPath,
+            deadline:     block.timestamp + 1 hours
+        });
+
+        vm.prank(alice);
+        uint256 lockId = swap.swapAndSave{value: bnbIn}(p);
+
+        AutoSaveVault vault = AutoSaveVault(factory.getVault(alice));
+        assertEq(vault.getLock(lockId).owner, alice);
+        assertTrue(vault.getLock(lockId).principal > 0);
+    }
+
+    // ─── Reverts ──────────────────────────────────────────────────────────────
+
+    function test_revertsDeadlinePassed() public {
         vm.warp(1_000);
-        SaveSwap.SwapParams memory p = _buildParams(ONE, 500, 0);
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(ONE, 500, address(usdcMock), _usdcPath(), noPath);
         p.deadline = block.timestamp - 1;
-
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(DeadlinePassed.selector, p.deadline, block.timestamp)
-        );
-        saveSwap.swapAndSave(p);
+        vm.expectRevert(abi.encodeWithSelector(DeadlinePassed.selector, p.deadline, block.timestamp));
+        swap.swapAndSave(p);
     }
 
-    function test_swapAndSave_revertsZeroAmount() public {
-        SaveSwap.SwapParams memory p = _buildParams(0, 500, 1 hours);
+    function test_revertsZeroAmount() public {
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(0, 500, address(usdcMock), _usdcPath(), noPath);
         vm.prank(alice);
         vm.expectRevert(ZeroAmount.selector);
-        saveSwap.swapAndSave(p);
+        swap.swapAndSave(p);
     }
 
-    function test_swapAndSave_revertsInvalidSaveBps() public {
-        uint256 bad = saveSwap.MAX_SAVE_BPS() + 1;
-        SaveSwap.SwapParams memory p = _buildParams(ONE, bad, 1 hours);
+    function test_revertsInvalidSaveBps() public {
+        uint256 bad = swap.MAX_SAVE_BPS() + 1;
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(ONE, bad, address(usdcMock), _usdcPath(), noPath);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(InvalidSaveBps.selector, bad));
-        saveSwap.swapAndSave(p);
+        swap.swapAndSave(p);
     }
 
-    function test_swapAndSave_revertsUnapprovedAggregator() public {
-        address bad = makeAddr("badAggregator");
-        SaveSwap.SwapParams memory p = _buildParams(ONE, 500, 1 hours);
-        p.aggregator = bad;
+    function test_revertsShortPath() public {
+        address[] memory shortPath = new address[](1);
+        shortPath[0] = address(tokenA);
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(ONE, 500, address(usdcMock), shortPath, noPath);
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(UnsupportedAggregator.selector, bad));
-        saveSwap.swapAndSave(p);
-    }
-
-    function test_swapAndSave_revertsOnSwapFailure() public {
-        FailingAggregator failing = new FailingAggregator();
-        vm.prank(owner);
-        saveSwap.setAggregator(address(failing), true);
-
-        SaveSwap.SwapParams memory p = _buildParams(ONE, 500, 1 hours);
-        p.aggregator     = address(failing);
-        p.aggregatorData = "";
-
-        vm.prank(alice);
-        vm.expectRevert(SwapFailed.selector);
-        saveSwap.swapAndSave(p);
+        vm.expectRevert(InvalidPath.selector);
+        swap.swapAndSave(p);
     }
 
     // ─── Admin ────────────────────────────────────────────────────────────────
 
-    function test_setAggregator_approves() public {
-        address newAgg = makeAddr("newAgg");
+    function test_setVaultFactory() public {
+        VaultFactory newF = new VaultFactory(address(usdcMock), treasury, address(0), owner);
         vm.prank(owner);
-        saveSwap.setAggregator(newAgg, true);
-        assertTrue(saveSwap.approvedAggregators(newAgg));
+        swap.setVaultFactory(address(newF));
+        assertEq(address(swap.vaultFactory()), address(newF));
     }
 
-    function test_setAggregator_revertsNonOwner() public {
+    function test_setVaultFactory_revertsNonOwner() public {
         vm.prank(alice);
         vm.expectRevert();
-        saveSwap.setAggregator(address(aggregator), false);
-    }
-
-    function test_setVaultFactory_updatesFactory() public {
-        VaultFactory newFactory = new VaultFactory(address(tokenOut), makeAddr("ap"), treasury, owner);
-        vm.prank(owner);
-        saveSwap.setVaultFactory(address(newFactory));
-        assertEq(address(saveSwap.vaultFactory()), address(newFactory));
-    }
-
-    function test_setVaultOverride_usesOverride() public {
-        // alice's override is already set in setUp; verify it's used
-        assertEq(saveSwap.userVaultOverride(alice), address(vault));
-    }
-
-    function test_setVaultOverride_clearOverride() public {
-        vm.prank(alice);
-        saveSwap.setVaultOverride(address(0));
-        assertEq(saveSwap.userVaultOverride(alice), address(0));
+        swap.setVaultFactory(address(factory));
     }
 
     // ─── Fuzz ─────────────────────────────────────────────────────────────────
 
-    function testFuzz_swapAndSave_splitIsConservative(uint256 amountIn, uint256 saveBps) public {
+    function testFuzz_usdcOut_splitConservation(uint256 amountIn, uint256 saveBps) public {
         amountIn = bound(amountIn, 1, 500 * ONE);
-        saveBps  = bound(saveBps,  0, saveSwap.MAX_SAVE_BPS());
+        saveBps  = bound(saveBps,  0, swap.MAX_SAVE_BPS());
 
-        tokenIn.mint(alice, amountIn);
-        tokenOut.mint(address(aggregator), amountIn);
+        tokenA.mint(alice, amountIn);
+        usdcMock.mint(address(router), amountIn);
 
-        uint256 aliceOutBefore = tokenOut.balanceOf(alice);
+        address[] memory noPath = new address[](0);
+        SaveSwap.SwapParams memory p = _params(amountIn, saveBps, address(usdcMock), _usdcPath(), noPath);
 
+        uint256 aliceUsdcBefore = usdcMock.balanceOf(alice);
         vm.prank(alice);
-        uint256 saved = saveSwap.swapAndSave(_buildParams(amountIn, saveBps, 1 hours));
+        swap.swapAndSave(p);
 
-        uint256 userReceived = tokenOut.balanceOf(alice) - aliceOutBefore;
-        assertEq(saved + userReceived, amountIn, "split must equal amountOut");
+        uint256 userReceived = usdcMock.balanceOf(alice) - aliceUsdcBefore;
+        uint256 savedAmount;
+
+        if (saveBps > 0 && factory.hasVault(alice)) {
+            AutoSaveVault vault = AutoSaveVault(factory.getVault(alice));
+            AutoSaveVault.Lock[] memory locks = vault.getUserLocks(alice);
+            if (locks.length > 0) savedAmount = locks[0].principal;
+        }
+
+        assertEq(userReceived + savedAmount, amountIn, "conservation: user + saved = amountOut");
     }
 }

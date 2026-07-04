@@ -4,20 +4,35 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useRouter } from "next/navigation";
 import { Copy, Check, ChevronRight, CreditCard, Repeat, TrendingUp, User, Mail, ArrowRight, Wallet } from "lucide-react";
-import { BlinButton } from "@/components/ui/BlinButton";
-import { BlinCard } from "@/components/ui/BlinCard";
-import { useAuth } from "@/hooks/useAuth";
-import { useUserStore } from "@/store/userStore";
-import { useProfile } from "@/hooks/useProfile";
+import { usePrivy }       from "@privy-io/react-auth";
+import { BlinButton }     from "@/components/ui/BlinButton";
+import { BlinCard }       from "@/components/ui/BlinCard";
+import { useUserStore }   from "@/store/userStore";
+import { upsertProfile }  from "@/lib/supabase";
+import { shortenAddress } from "@/lib/format";
 
 const TOTAL_STEPS = 4;
 
 export default function Onboarding() {
   const router = useRouter();
-  const { address, shortAddress, isConnected, isConnecting } = useAuth();
+  const { ready, authenticated, user } = usePrivy();
+  const address      = user?.wallet?.address as `0x${string}` | undefined;
+  const shortAddress = address ? shortenAddress(address) : null;
+  const isConnected  = authenticated && !!address;
+  const isConnecting = !ready;
   const { setProfile, completeOnboarding, displayName, email, autoSaveEnabled, savePercent, lockDuration, hasCompletedOnboarding } = useUserStore();
 
-  const { saveToDb } = useProfile();
+  const saveToDb = async () => {
+    if (!address) return;
+    await upsertProfile(address, {
+      display_name:     displayName || nameInput.trim(),
+      email:            email       || emailInput.trim(),
+      autosave_enabled: autoSaveEnabled,
+      save_percent:     savePercent,
+      lock_duration:    lockDuration,
+      onboarding_done:  true,
+    });
+  };
 
   const [step, setStep]         = useState(1);
   const [copied, setCopied]     = useState(false);

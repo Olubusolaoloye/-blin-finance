@@ -47,13 +47,13 @@ export interface VaultDataResult {
 // Asset symbol/decimals per chain (including testnets)
 const ASSET_SYMBOL: Record<number, string>   = {
   1: "USDC", 56: "USDT", 42161: "USDC",
-  421614: "mUSDC",   // MockERC20 on Arbitrum Sepolia
-  97:     "mUSDT",   // MockERC20 on BSC Testnet
+  421614: "mUSDC",  // MockERC20 on Arbitrum Sepolia
+  97:     "mUSDC",  // MockERC20 on BSC Testnet (6 decimals, same as Arb Sepolia)
 };
 const ASSET_DECIMALS: Record<number, number> = {
   1: 6, 56: 18, 42161: 6,
   421614: 6,
-  97:     18,
+  97:     6,
 };
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -119,9 +119,9 @@ export function useVaultData(): VaultDataResult {
 
   const allLocks   = locks ?? [];
   const nowSec     = BigInt(Math.floor(Date.now() / 1000));
-  const activeLocks = allLocks.filter((l) => !l.broken && l.lockedUntil > nowSec);
-  const readyLocks  = allLocks.filter((l) => !l.broken && l.lockedUntil <= nowSec);
-  const totalSaved  = activeLocks.reduce((sum, l) => sum + l.amount, 0n);
+  const activeLocks = allLocks.filter((l) => !l.settled && l.lockedUntil > nowSec);
+  const readyLocks  = allLocks.filter((l) => !l.settled && l.lockedUntil <= nowSec);
+  const totalSaved  = activeLocks.reduce((sum, l) => sum + l.principal, 0n);
   const totalSavedHuman = parseFloat(formatUnits(totalSaved, assetDecimals));
 
   return {

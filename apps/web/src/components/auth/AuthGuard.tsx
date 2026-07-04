@@ -17,7 +17,7 @@ import { useAuth }   from "@/hooks/useAuth";
  *  ready, authenticated  → render children (wagmi may still be connecting, that's OK)
  */
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { ready, authenticated, isConnecting } = useAuth();
+  const { ready, authenticated } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -26,13 +26,15 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [ready, authenticated, router]);
 
-  // Privy is still restoring the session from localStorage / cookie
-  if (!ready || isConnecting) {
+  // Only block while Privy is hydrating the saved session (~100-300 ms).
+  // wagmi's isConnecting/isReconnecting runs in the background and must NOT
+  // stall the UI — the app renders fine while wagmi finishes connecting.
+  if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-surface-base">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 rounded-full border-4 border-brand-accent/20 border-t-brand-accent animate-spin" />
-          <p className="text-[14px] text-text-muted font-medium">Loading your wallet…</p>
+          <p className="text-[14px] text-text-muted font-medium">Loading…</p>
         </div>
       </div>
     );

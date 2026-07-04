@@ -1,40 +1,38 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { usePrivy } from "@privy-io/react-auth";
-import { useAuth } from "@/hooks/useAuth";
-import { useUserStore } from "@/store/userStore";
-import { useEffect } from "react";
-import { Wallet } from "lucide-react";
+import { useRouter }     from "next/navigation";
+import { usePrivy }      from "@privy-io/react-auth";
+import { useUserStore }  from "@/store/userStore";
+import { Wallet }        from "lucide-react";
 
 export function HeroCTA() {
   const router = useRouter();
-  const { isConnected } = useAuth();
+  const { ready, authenticated } = usePrivy();
   const { hasCompletedOnboarding } = useUserStore();
-  const { login } = usePrivy();
 
-  // If already connected, go straight to app
-  useEffect(() => {
-    if (isConnected) {
-      router.replace(hasCompletedOnboarding ? "/dashboard" : "/onboarding");
+  const handleCTA = () => {
+    if (ready && authenticated) {
+      router.push(hasCompletedOnboarding ? "/dashboard" : "/onboarding");
+    } else {
+      router.push("/login");
     }
-  }, [isConnected, hasCompletedOnboarding, router]);
+  };
 
   return (
     <div className="flex flex-col sm:flex-row items-center gap-3 mt-10">
       <button
-        onClick={() => router.push("/login")}
+        onClick={handleCTA}
         className="flex items-center justify-center gap-2.5 w-full sm:w-auto px-7 h-[54px] bg-white text-[#0D2137] rounded-full font-bold text-[15px] shadow-[0_8px_32px_rgba(0,0,0,0.35)] hover:scale-[1.02] active:scale-[0.98] transition-transform"
       >
         <GoogleIcon />
-        Sign in with Google
+        {ready && authenticated ? "Go to Dashboard" : "Sign in with Google"}
       </button>
       <button
-        onClick={() => login()}
+        onClick={handleCTA}
         className="flex items-center justify-center gap-2.5 w-full sm:w-auto px-7 h-[54px] bg-white/10 border border-white/20 text-white rounded-full font-bold text-[15px] hover:bg-white/15 transition-colors backdrop-blur-sm"
       >
         <Wallet size={18} />
-        Connect Wallet
+        {ready && authenticated ? "Open Wallet" : "Connect Wallet"}
       </button>
     </div>
   );

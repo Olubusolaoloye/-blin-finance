@@ -7,6 +7,17 @@ import { ArrowRight, ShieldCheck, Zap, Lock, CheckCircle2, Wallet, Mail } from "
 import { usePrivy } from "@privy-io/react-auth";
 import { useUserStore } from "@/store/userStore";
 
+// Deterministic particle data — avoids SSR/CSR hydration mismatch from Math.random()
+const PARTICLES = Array.from({ length: 20 }, (_, i) => ({
+  width:    (i * 17 % 4) + 2,
+  height:   (i * 13 % 4) + 2,
+  color:    i % 2 === 0 ? "var(--brand-gold)" : "white",
+  left:     (i * 37 % 100),
+  top:      (i * 53 % 100),
+  opacity:  (i * 7 % 30) / 100 + 0.2,
+  duration: (i * 11 % 10) + 10,
+}));
+
 // ─── Smart wallet creation steps (visual feedback during OAuth) ───────────────
 
 const SMART_WALLET_STEPS = [
@@ -109,20 +120,20 @@ export default function Login() {
       {/* ── Left hero panel ──────────────────────────────────────────────── */}
       <div className="relative flex-1 flex flex-col justify-center items-center p-8 overflow-hidden bg-gradient-to-br from-[#0D2137] to-[#1A3C6E]">
         {/* Floating particles */}
-        {Array.from({ length: 20 }).map((_, i) => (
+        {PARTICLES.map((p, i) => (
           <motion.div
             key={i}
             className="absolute rounded-full pointer-events-none"
             style={{
-              width:           Math.random() * 4 + 2 + "px",
-              height:          Math.random() * 4 + 2 + "px",
-              backgroundColor: Math.random() > 0.5 ? "var(--brand-gold)" : "white",
-              left:            Math.random() * 100 + "%",
-              top:             Math.random() * 100 + "%",
-              opacity:         Math.random() * 0.3 + 0.2,
+              width:           p.width + "px",
+              height:          p.height + "px",
+              backgroundColor: p.color,
+              left:            p.left + "%",
+              top:             p.top + "%",
+              opacity:         p.opacity,
             }}
             animate={{ y: [0, -100], opacity: [0, 0.5, 0] }}
-            transition={{ duration: Math.random() * 10 + 10, repeat: Infinity, ease: "linear" }}
+            transition={{ duration: p.duration, repeat: Infinity, ease: "linear" }}
           />
         ))}
 

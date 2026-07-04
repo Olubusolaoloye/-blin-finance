@@ -7,13 +7,15 @@ import {
   CheckCircle2, Search, Loader2, RefreshCw, Plus, X, AlertCircle,
 } from "lucide-react";
 import { useChainId } from "wagmi";
-import { formatUnits } from "viem";
+import { formatUnits, parseUnits } from "viem";
 import { BlinButton } from "@/components/ui/BlinButton";
 import { BlinCard } from "@/components/ui/BlinCard";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 import { BottomSheet } from "@/components/ui/BottomSheet";
 import { useNotifications } from "@/components/notifications/NotificationContext";
 import { useSwapQuote } from "@/hooks/useSwapQuote";
+import { useBlinClient } from "@/hooks/useBlinClient";
+import { executeSwapWithSave } from "@blin/sdk";
 import { useBalances } from "@/hooks/useBalances";
 import { useNativeBalance } from "@/hooks/useNativeBalance";
 import { useTokenPrices } from "@/hooks/useTokenPrices";
@@ -61,6 +63,7 @@ export default function SwapPage() {
   const { addNotification }  = useNotifications();
   const wagmiChainId         = useChainId();
   const { address }          = useAuth();
+  const client               = useBlinClient();
 
   const chainId = isKnownChainId(wagmiChainId) ? wagmiChainId : 1;
 
@@ -151,11 +154,12 @@ export default function SwapPage() {
 
   // ── AutoSave — persisted in Zustand (shared with Vault page) ─────────────
   const {
-    autoSaveEnabled:  autoSave,
-    savePercent:      savePercentage,
-    setAutoSave:      setAutoSave,
-    setSavePercent:   setSavePercentage,
-    contractsEnabled: autoSaveContractsEnabled,
+    autoSaveEnabled:     autoSave,
+    savePercent:         savePercentage,
+    setAutoSave:         setAutoSave,
+    setSavePercent:      setSavePercentage,
+    contractsEnabled:    autoSaveContractsEnabled,
+    lockDurationSeconds,
   } = useAutoSaveConfig();
 
   const [swapState,      setSwapState]      = useState<"idle" | "loading" | "success">("idle");
@@ -227,26 +231,62 @@ export default function SwapPage() {
     : null;
 
   const handleSwap = useCallback(async () => {
-    if (!quote) return;
+    if (!quote || !address) return;
     setSwapState("loading");
     try {
-      // TODO (Phase D): when autoSaveContractsEnabled && autoSave, call
-      //   executeSwapWithSave(client, { ...quote, saveBps: savePercentage * 100 }).write()
-      // For now simulate a 2-second confirmation delay
-      await new Promise<void>((res) => setTimeout(res, 2000));
-      setSwapState("success");
-      addNotification({
-        title:   "Swap Successful!",
-        message: `Swapped ${fromAmount} ${fromToken.symbol} → ${fmt(toAmount, 4)} ${toToken.symbol} via ${providerLabel ?? "aggregator"}.`,
-        type:    "success",
-      });
-      if (autoSave) {
-        const saved = parseFloat(toAmount ?? "0") * (savePercentage / 100);
+      if (autoSaveContractsEnabled && client?.walletClient) {
+        // ── Real on-chain swap via SaveSwap contract ────────────────────────
+        const amountIn = parseUnits(fromAmount, fromToken.decimals);
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 300); // 5 min
+
+        const swapResult = await executeSwapWithSave(client, {
+          quote,
+          saveBps:      autoSave ? savePercentage * 100 : 0,
+          deadline,
+          tokenIn:      fromToken.address,
+          tokenOut:     toToken.address,
+          amountIn,
+          lockDuration: lockDurationSeconds,
+        });
+
+        if (swapResult.isErr()) throw swapResult.error;
+        const { lockId } = swapResult.value;
+
+        setSwapState("success");
         addNotification({
-          title:   "AutoSave Vault",
-          message: `${fmt(saved, 4)} ${toToken.symbol} auto-saved.`,
+          title:   "Swap Successful!",
+          message: `Swapped ${fromAmount} ${fromToken.symbol} → ${fmt(toAmount, 4)} ${toToken.symbol}.`,
           type:    "success",
         });
+
+        // Show AutoSave notification only when a lock was actually created
+        // (lockId === type(uint256).max means saveBps=0 or saveAmount rounded to 0)
+        const noLock = lockId === (2n ** 256n - 1n);
+        if (autoSave && !noLock) {
+          const savedAmt = parseFloat(toAmount ?? "0") * (savePercentage / 100);
+          addNotification({
+            title:   "AutoSave Vault",
+            message: `${fmt(savedAmt, 4)} ${toToken.symbol} auto-saved → Lock #${lockId}.`,
+            type:    "success",
+          });
+        }
+      } else {
+        // ── Simulation fallback (contracts not yet deployed on this chain) ──
+        await new Promise<void>((res) => setTimeout(res, 2000));
+        setSwapState("success");
+        addNotification({
+          title:   "Swap Successful!",
+          message: `Swapped ${fromAmount} ${fromToken.symbol} → ${fmt(toAmount, 4)} ${toToken.symbol} via ${providerLabel ?? "aggregator"}.`,
+          type:    "success",
+        });
+        if (autoSave) {
+          const saved = parseFloat(toAmount ?? "0") * (savePercentage / 100);
+          addNotification({
+            title:   "AutoSave Vault",
+            message: `${fmt(saved, 4)} ${toToken.symbol} auto-saved.`,
+            type:    "success",
+          });
+        }
       }
       setTimeout(() => { setSwapState("idle"); setFromAmount(""); }, 3000);
     } catch (err: unknown) {
@@ -257,7 +297,11 @@ export default function SwapPage() {
         type:    "alert",
       });
     }
-  }, [quote, fromAmount, toAmount, fromToken, toToken, providerLabel, autoSave, savePercentage, addNotification]);
+  }, [
+    quote, fromAmount, toAmount, fromToken, toToken,
+    address, client, autoSave, autoSaveContractsEnabled,
+    savePercentage, lockDurationSeconds, providerLabel, addNotification,
+  ]);
 
   // ── Derived display ───────────────────────────────────────────────────────
 

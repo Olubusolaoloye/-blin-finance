@@ -15,7 +15,7 @@
  */
 
 import type { PrivyClientConfig } from "@privy-io/react-auth";
-import { mainnet, arbitrum, arbitrumSepolia, bsc } from "wagmi/chains";
+import { mainnet, arbitrum, arbitrumSepolia, bsc, bscTestnet } from "wagmi/chains";
 
 export const PRIVY_APP_ID =
   process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "clxxxxxxxxxxxxxxxxxxxxxxx";
@@ -58,5 +58,5 @@ export const privyConfig: PrivyClientConfig = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   defaultChain:    arbitrumSepolia as any,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supportedChains: [arbitrumSepolia, mainnet, bsc, arbitrum] as any[],
+  supportedChains: [arbitrumSepolia, bscTestnet, mainnet, bsc, arbitrum] as any[],
 };

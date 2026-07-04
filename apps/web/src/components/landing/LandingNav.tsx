@@ -1,19 +1,29 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/hooks/useAuth";
+import { useRouter }           from "next/navigation";
+import { usePrivy }            from "@privy-io/react-auth";
+import { useUserStore }        from "@/store/userStore";
 
 export function LandingNav() {
-  const router = useRouter();
-  const { isConnected } = useAuth();
+  const router   = useRouter();
   const [scrolled, setScrolled] = useState(false);
+  const { ready, authenticated } = usePrivy();
+  const { hasCompletedOnboarding } = useUserStore();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  const handleLaunchApp = () => {
+    if (ready && authenticated) {
+      router.push(hasCompletedOnboarding ? "/dashboard" : "/onboarding");
+    } else {
+      router.push("/login");
+    }
+  };
 
   return (
     <nav
@@ -30,16 +40,16 @@ export function LandingNav() {
         </div>
 
         <div className="hidden md:flex items-center gap-8 text-[14px] text-white/60">
-          <a href="#features" className="hover:text-white transition-colors">Features</a>
+          <a href="#features"     className="hover:text-white transition-colors">Features</a>
           <a href="#how-it-works" className="hover:text-white transition-colors">How it works</a>
-          <a href="#trust" className="hover:text-white transition-colors">Security</a>
+          <a href="#trust"        className="hover:text-white transition-colors">Security</a>
         </div>
 
         <button
-          onClick={() => router.push(isConnected ? "/dashboard" : "/login")}
+          onClick={handleLaunchApp}
           className="px-5 py-2.5 rounded-full bg-white text-[#0D2137] text-[14px] font-bold hover:bg-white/90 transition-all shadow-lg"
         >
-          {isConnected ? "Open App →" : "Launch App →"}
+          {ready && authenticated ? "Open App →" : "Launch App →"}
         </button>
       </div>
     </nav>
