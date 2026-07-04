@@ -227,7 +227,11 @@ export default function SwapPage() {
   };
 
   const providerLabel = provider
-    ? { paraswap: "ParaSwap", "1inch": "1inch", pancakeswap: "PancakeSwap" }[provider]
+    ? ({
+        "pancakeswap-v2": "PancakeSwap V2",
+        "uniswap-v3":     "Uniswap V3",
+        "mock":           "Mock DEX",
+      } as Record<string, string>)[provider] ?? provider
     : null;
 
   const handleSwap = useCallback(async () => {

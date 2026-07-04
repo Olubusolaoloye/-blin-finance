@@ -9,12 +9,14 @@ export type BscContractAddresses = {
   saveSwap:      `0x${string}`;
   /** USDC on BSC (6 decimals). */
   usdc:          `0x${string}`;
-  /** WBNB — used in PancakeSwap swap paths. */
+  /** WBNB / WETH — used in swap paths. */
   wbnb:          `0x${string}`;
-  /** PancakeSwap V2 Router02. */
+  /** PancakeSwap V2 Router02 (BSC) or Uniswap V3 SwapRouter02 (ETH/Arb). */
   pancakeRouter: `0x${string}`;
   /** Treasury receives early-exit USDC penalties. */
   treasury:      `0x${string}`;
+  /** Uniswap V3 QuoterV2 — set on ETH mainnet and Arbitrum; zero on BSC. */
+  uniswapV3Quoter?: `0x${string}`;
 };
 
 // ─── Ethereum chain addresses (BLIN yield claiming) ──────────────────────────
@@ -62,25 +64,27 @@ export const CONTRACT_ADDRESSES: Record<SupportedChainId, ContractAddresses> = {
   },
   // ── Ethereum Mainnet (referenced by BSC users for yield claiming) ─────────
   1: {
-    vaultFactory:  ZERO,
-    saveSwap:      ZERO,
-    usdc:          "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    wbnb:          "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
-    pancakeRouter: ZERO,
-    treasury:      ZERO,
+    vaultFactory:     ZERO,
+    saveSwap:         ZERO,
+    usdc:             "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    wbnb:             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", // WETH
+    pancakeRouter:    "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45", // Uniswap V3 SwapRouter02
+    uniswapV3Quoter:  "0x61fFE014bA17989E743c5F6cB21bF9697530B21e", // QuoterV2
+    treasury:         ZERO,
     eth: {
       blinYieldDistributor: ZERO,
       blinToken:            BLIN_TOKEN_ADDRESS,
     },
   },
-  // ── Arbitrum One (future) ─────────────────────────────────────────────────
+  // ── Arbitrum One ──────────────────────────────────────────────────────────
   42161: {
-    vaultFactory:  ZERO,
-    saveSwap:      ZERO,
-    usdc:          "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    wbnb:          "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-    pancakeRouter: ZERO,
-    treasury:      ZERO,
+    vaultFactory:     ZERO,
+    saveSwap:         ZERO,
+    usdc:             "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    wbnb:             "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", // WETH on Arb
+    pancakeRouter:    "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45", // Uniswap V3 SwapRouter02
+    uniswapV3Quoter:  "0x61fFE014bA17989E743c5F6cB21bF9697530B21e", // QuoterV2
+    treasury:         ZERO,
     eth: {
       blinYieldDistributor: ZERO,
       blinToken:            BLIN_TOKEN_ADDRESS,

@@ -29,7 +29,8 @@ export interface QuoteResult {
   route: RouteStep[];
   gasEstimate: bigint;
   priceImpactBps: number;
-  provider: "paraswap" | "1inch" | "pancakeswap";
+  /** DEX that provided the quote. */
+  provider: "uniswap-v3" | "pancakeswap-v2" | "mock" | string;
 }
 
 export interface RouteStep {

@@ -101,13 +101,15 @@ export function usePortfolio(): PortfolioResult {
 
   function getPrice(symbol: string): number {
     const cgId = CG_IDS[symbol.toUpperCase()];
-    if (cgId && cgPrices?.[cgId]?.usd) return cgPrices[cgId].usd;
+    const entry = cgId ? cgPrices?.[cgId] : undefined;
+    if (entry?.usd) return entry.usd;
     return FALLBACK_PRICES[symbol.toUpperCase()] ?? 0;
   }
 
   function getChange24h(symbol: string): number {
     const cgId = CG_IDS[symbol.toUpperCase()];
-    if (cgId && cgPrices?.[cgId]?.usd_24h_change != null) return cgPrices[cgId].usd_24h_change!;
+    const entry = cgId ? cgPrices?.[cgId] : undefined;
+    if (entry?.usd_24h_change != null) return entry.usd_24h_change;
     return 0;
   }
 
@@ -130,7 +132,7 @@ export function usePortfolio(): PortfolioResult {
     if (ethAmt > 0) {
       nativeTokens.push({
         symbol:   "ETH",
-        name:     NATIVE_NAME[1],
+        name:     NATIVE_NAME[1] ?? "Ethereum",
         address:  NATIVE_ADDRESS,
         decimals: 18,
         balance:  ethBal!.value,
@@ -144,7 +146,7 @@ export function usePortfolio(): PortfolioResult {
     if (bnbAmt > 0) {
       nativeTokens.push({
         symbol:   "BNB",
-        name:     NATIVE_NAME[56],
+        name:     NATIVE_NAME[56] ?? "BNB Chain",
         address:  NATIVE_ADDRESS,
         decimals: 18,
         balance:  bnbBal!.value,
