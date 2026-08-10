@@ -303,8 +303,9 @@ async function _executeViaSaveSwap({
         data:      log.data,
         topics:    log.topics,
       });
-      lockId    = decoded.args.lockId;
-      savedUsdc = decoded.args.usdcSaved;
+      const args = decoded.args as { lockId: bigint; usdcSaved: bigint };
+      lockId    = args.lockId;
+      savedUsdc = args.usdcSaved;
       break;
     } catch { /* not our event — skip */ }
   }
